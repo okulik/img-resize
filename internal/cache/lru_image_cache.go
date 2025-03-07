@@ -2,14 +2,13 @@ package cache
 
 import (
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/okulik/fm-go/internal/image"
 )
 
 type LRUImageCache struct {
 	*lru.Cache
 }
 
-func NewLRUImageCache(size int) (image.ImageCacheAdapter, error) {
+func NewLRUImageCache(size int) (ImageCacheAdapter, error) {
 	cache, err := lru.New(size)
 	if err != nil {
 		return nil, err

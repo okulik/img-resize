@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/pkg/errors"
 
+	"github.com/okulik/fm-go/internal/cache"
 	"github.com/okulik/fm-go/internal/image"
 	"github.com/okulik/fm-go/internal/model"
 	"github.com/okulik/fm-go/internal/settings"
@@ -20,12 +21,12 @@ const (
 
 type ResizerHandler struct {
 	settings   *settings.Settings
-	imageCache image.ImageCacheAdapter
+	imageCache cache.ImageCacheAdapter
 	resizer    image.ImageResizer
 }
 
 // Creates a new instance of ResizerHandler object.
-func NewResizerHandler(settings *settings.Settings, imageCache image.ImageCacheAdapter, resizer image.ImageResizer) *ResizerHandler {
+func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer image.ImageResizer) *ResizerHandler {
 	return &ResizerHandler{
 		settings:   settings,
 		imageCache: imageCache,
@@ -57,8 +58,7 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	async := r.URL.Query().Get("async")
-	if async == "true" || async == "1" {
+	if isAsyncResize(r) {
 		if !rh.settings.Service.AsyncResize {
 			web.WriteErrorResponse(w, errors.New("async resize is disabled"), http.StatusFailedDependency)
 			return
@@ -68,7 +68,7 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := rh.resizer.Process(resizeReq)
+	resp, err := rh.resizer.Process(resizeReq, r.Context())
 	if err != nil {
 		web.WriteErrorResponse(w, errors.Wrap(err, "failed to resize images"), http.StatusInternalServerError)
 		return
@@ -94,6 +94,11 @@ func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.WriteErrorResponse(w, errors.New("image not cached"), http.StatusNotFound)
+}
+
+func isAsyncResize(r *http.Request) bool {
+	async := r.URL.Query().Get("async")
+	return async == "true" || async == "1"
 }
 
 func writeImageResponse(w http.ResponseWriter, data []byte) {

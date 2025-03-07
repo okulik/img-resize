@@ -3,6 +3,7 @@ package image
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	jpgresize "github.com/nfnt/resize"
 
+	"github.com/okulik/fm-go/internal/cache"
 	"github.com/okulik/fm-go/internal/model"
 	"github.com/okulik/fm-go/internal/settings"
 )
@@ -38,14 +40,14 @@ type ResizeJob struct {
 // synchronous and asynchronous image resizing.
 type Resizer struct {
 	settings         *settings.Settings
-	imageCache       ImageCacheAdapter
+	imageCache       cache.ImageCacheAdapter
 	resizeJobs       chan *ResizeJob
 	resizingProgress *ResizingProgress
 	wg               sync.WaitGroup
 }
 
 // Creates a new instance of the Resizer object.
-func NewResizer(settings *settings.Settings, imageCache ImageCacheAdapter) *Resizer {
+func NewResizer(settings *settings.Settings, imageCache cache.ImageCacheAdapter) *Resizer {
 	return &Resizer{
 		settings:         settings,
 		imageCache:       imageCache,
@@ -68,7 +70,7 @@ func (r *Resizer) Start() {
 			defer r.wg.Done()
 
 			for job := range r.resizeJobs {
-				_, _ = r.processImageResize(job.URL, job.Width, job.Height)
+				_, _ = r.processImageResize(context.Background(), job.URL, job.Width, job.Height)
 				r.resizingProgress.DeleteResizing(genImageID(job.URL, job.Width, job.Height))
 			}
 		}()
@@ -123,11 +125,11 @@ func (r *Resizer) ProcessAsync(request *model.ResizeRequest) []model.ResizeRespo
 }
 
 // Synchronously resize a batch of images, identified by their URLs.
-func (r *Resizer) Process(request *model.ResizeRequest) ([]model.ResizeResponse, error) {
+func (r *Resizer) Process(request *model.ResizeRequest, ctx context.Context) ([]model.ResizeResponse, error) {
 	results := make([]model.ResizeResponse, 0, len(request.URLs))
 
 	for _, url := range request.URLs {
-		resp, err := r.processImageResize(url, request.Width, request.Height)
+		resp, err := r.processImageResize(ctx, url, request.Width, request.Height)
 		if err != nil {
 			results = append(results, resp)
 		}
@@ -140,7 +142,7 @@ func (r *Resizer) ResizingProgress() *ResizingProgress {
 	return r.resizingProgress
 }
 
-func (r *Resizer) processImageResize(url string, width uint, height uint) (model.ResizeResponse, error) {
+func (r *Resizer) processImageResize(ctx context.Context, url string, width uint, height uint) (model.ResizeResponse, error) {
 	imageID := genImageID(url, width, height)
 
 	// First check if the image is already cached
@@ -149,7 +151,7 @@ func (r *Resizer) processImageResize(url string, width uint, height uint) (model
 	}
 
 	// Retrieve the image from the url
-	data, err := r.fetchAndResize(url, width, height)
+	data, err := r.fetchAndResize(ctx, url, width, height)
 	if err != nil {
 		log.Printf("failed to resize %s: %v", url, err)
 		return model.ResizeResponse{Result: statusFailure}, err
@@ -161,8 +163,8 @@ func (r *Resizer) processImageResize(url string, width uint, height uint) (model
 	return model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: false}, nil
 }
 
-func (r *Resizer) fetchAndResize(url string, width uint, height uint) ([]byte, error) {
-	data, err := r.fetch(url)
+func (r *Resizer) fetchAndResize(ctx context.Context, url string, width uint, height uint) ([]byte, error) {
+	data, err := r.fetch(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +172,8 @@ func (r *Resizer) fetchAndResize(url string, width uint, height uint) ([]byte, e
 	return r.resize(data, width, height)
 }
 
-func (r *Resizer) fetch(url string) ([]byte, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func (r *Resizer) fetch(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +201,7 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 	// decode jpeg into image.Image
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to jped decode: %v", err)
+		return nil, fmt.Errorf("failed to decode jpeg: %v", err)
 	}
 
 	// if either width or height is 0, it will resize respecting the aspect ratio

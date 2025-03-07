@@ -1,4 +1,4 @@
-package image
+package cache
 
 type ImageCacheAdapter interface {
 	Get(key string) ([]byte, bool)

@@ -12,17 +12,18 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/okulik/fm-go/internal/cache"
 	"github.com/okulik/fm-go/internal/image"
 	"github.com/okulik/fm-go/internal/settings"
 )
 
 type Service struct {
 	settings   *settings.Settings
-	imageCache image.ImageCacheAdapter
+	imageCache cache.ImageCacheAdapter
 	resizer    *image.Resizer
 }
 
-func NewService(settings *settings.Settings, imageCache image.ImageCacheAdapter, resizer *image.Resizer) *Service {
+func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer *image.Resizer) *Service {
 	return &Service{
 		settings:   settings,
 		imageCache: imageCache,
@@ -85,12 +86,11 @@ func (svc *Service) handleSignals(server *http.Server) error {
 	gracefulCtx, gracefulCancel :=
 		context.WithTimeout(context.Background(), svc.settings.Http.ServerGracefulShutdownTimeout)
 	defer gracefulCancel()
+	defer svc.resizer.Shutdown()
 
 	if err := server.Shutdown(gracefulCtx); err != nil {
 		return err
 	}
-
-	svc.resizer.Shutdown()
 
 	return nil
 }

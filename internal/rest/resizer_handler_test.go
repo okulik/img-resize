@@ -1,6 +1,7 @@
 package rest_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -81,11 +82,11 @@ func buildResizerHandler() *rest.ResizerHandler {
 
 type mockImageResizer struct {
 	settings         *settings.Settings
-	cache            image.ImageCacheAdapter
+	cache            cache.ImageCacheAdapter
 	resizingProgress *image.ResizingProgress
 }
 
-func NewMockResizer(settings *settings.Settings, cache image.ImageCacheAdapter) image.ImageResizer {
+func NewMockResizer(settings *settings.Settings, cache cache.ImageCacheAdapter) image.ImageResizer {
 	return &mockImageResizer{
 		settings:         settings,
 		cache:            cache,
@@ -101,13 +102,13 @@ func (mir *mockImageResizer) Shutdown() {
 
 }
 
-func (mir *mockImageResizer) Process(request *model.ResizeRequest) ([]model.ResizeResponse, error) {
+func (mir *mockImageResizer) Process(_ *model.ResizeRequest, _ context.Context) ([]model.ResizeResponse, error) {
 	resp := make([]model.ResizeResponse, 0, 1)
 	resp = append(resp, model.ResizeResponse{Result: "success", ID: "abc123", Cached: false})
 	return resp, nil
 }
 
-func (mir *mockImageResizer) ProcessAsync(request *model.ResizeRequest) []model.ResizeResponse {
+func (mir *mockImageResizer) ProcessAsync(_ *model.ResizeRequest) []model.ResizeResponse {
 	resp := make([]model.ResizeResponse, 0, 1)
 	resp = append(resp, model.ResizeResponse{Result: "enqueued", ID: "def456", Cached: false})
 	return resp

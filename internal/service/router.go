@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/okulik/fm-go/internal/cache"
 	"github.com/okulik/fm-go/internal/image"
 	"github.com/okulik/fm-go/internal/rest"
 	"github.com/okulik/fm-go/internal/settings"
@@ -17,7 +18,7 @@ const (
 	v1Path     string = "/v1"
 )
 
-func NewRouter(settings *settings.Settings, imageCache image.ImageCacheAdapter, resizer image.ImageResizer) *chi.Mux {
+func NewRouter(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer image.ImageResizer) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Get(healthPath, func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +30,7 @@ func NewRouter(settings *settings.Settings, imageCache image.ImageCacheAdapter, 
 	return r
 }
 
-func createV1Router(settings *settings.Settings, imageCache image.ImageCacheAdapter, resizer image.ImageResizer) http.Handler {
+func createV1Router(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer image.ImageResizer) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.BasicAuth(settings.Auth.Realm, map[string]string{settings.Auth.Username: settings.Auth.Password}))
 	resizerHandler := rest.NewResizerHandler(settings, imageCache, resizer)
