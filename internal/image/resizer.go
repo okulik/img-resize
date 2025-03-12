@@ -100,7 +100,7 @@ func (r *Resizer) ProcessAsync(request *model.ResizeRequest) []model.ResizeRespo
 		imageID := genImageID(url, request.Width, request.Height)
 
 		// Check if the image is cached
-		if r.imageCache.Contains(imageID) {
+		if r.imageCache.Contains(context.Background(), imageID) {
 			results = append(results, model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: true})
 			continue
 		}
@@ -146,7 +146,7 @@ func (r *Resizer) processImageResize(ctx context.Context, url string, width uint
 	imageID := genImageID(url, width, height)
 
 	// First check if the image is already cached
-	if r.imageCache.Contains(imageID) {
+	if r.imageCache.Contains(ctx, imageID) {
 		return model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: true}, nil
 	}
 
@@ -158,7 +158,7 @@ func (r *Resizer) processImageResize(ctx context.Context, url string, width uint
 	}
 
 	log.Print("caching ", imageID)
-	r.imageCache.Add(imageID, data)
+	r.imageCache.Add(ctx, imageID, data)
 
 	return model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: false}, nil
 }

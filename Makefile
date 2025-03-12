@@ -67,6 +67,10 @@ docker-build: deps ## Builds docker image
 docker-run: deps ## Builds and runs docker image
 	docker run --rm -p 4000:4000 -e AUTH_USERNAME=$(AUTH_USERNAME) -e AUTH_PASSWORD=$(AUTH_PASSWORD) $(SVCNAME)
 
+.PHONY: docker-compose-run
+docker-compose-run: deps ## Builds and runs docker compose services
+	docker compose up -d
+
 $(TOOLSBIN)/golangci-lint:  ## Installs golang linter
 	scripts/install-golangci-lint $(TOOLSBIN) v1.64.6
 
