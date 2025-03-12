@@ -15,7 +15,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	cache, err := cache.NewLRUImageCache(settings.Service.ImageCacheSize)
+	//cache, err := cache.NewLRUImageCache(settings.Service.ImageCacheSize)
+	cache, err := cache.NewRedisImageCache(settings)
 	if err != nil {
 		log.Panicf("Faild to create image cache: %v", err)
 	}

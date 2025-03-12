@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 	"github.com/pkg/errors"
 
 	"github.com/okulik/fm-go/internal/cache"
@@ -87,7 +87,7 @@ func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if the image was cached
-	data, ok := rh.imageCache.Get(imageID)
+	data, ok := rh.imageCache.Get(r.Context(), imageID)
 	if ok {
 		writeImageResponse(w, data)
 		return

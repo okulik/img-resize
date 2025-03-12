@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 
 	"github.com/okulik/fm-go/internal/cache"
 	"github.com/okulik/fm-go/internal/image"

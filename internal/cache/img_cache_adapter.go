@@ -1,7 +1,9 @@
 package cache
 
+import "context"
+
 type ImageCacheAdapter interface {
-	Get(key string) ([]byte, bool)
-	Contains(key string) bool
-	Add(key string, data []byte) bool
+	Get(ctx context.Context, key string) ([]byte, bool)
+	Contains(ctx context.Context, key string) bool
+	Add(ctx context.Context, key string, data []byte) bool
 }

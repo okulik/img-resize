@@ -1,0 +1,27 @@
+name: resizer
+
+services:
+  resizer:
+    build:
+      context: .
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - AUTH_USERNAME=admin
+      - AUTH_PASSWORD=admin
+      - SVC_REDIS_HOST=redis
+    ports:
+      - target: "4000"
+        published: "4000"
+        protocol: tcp
+        mode: host
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:8.0-M03-alpine
+    command: redis-server
+    ports:
+      - target: "6379"
+        published: "6379"
+        protocol: tcp
+        mode: host
