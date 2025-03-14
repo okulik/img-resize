@@ -10,7 +10,8 @@ import (
 )
 
 type RedisImageCache struct {
-	client *redis.Client
+	*redis.Client
+	settings *settings.Settings
 }
 
 func NewRedisImageCache(settings *settings.Settings) (ImageCacheAdapter, error) {
@@ -19,11 +20,14 @@ func NewRedisImageCache(settings *settings.Settings) (ImageCacheAdapter, error) 
 		Password: "",
 		DB:       0,
 	})
-	return &RedisImageCache{client: client}, nil
+	return &RedisImageCache{
+		Client:   client,
+		settings: settings,
+	}, nil
 }
 
 func (cache *RedisImageCache) Get(ctx context.Context, key string) ([]byte, bool) {
-	data, err := cache.client.Get(ctx, key).Bytes()
+	data, err := cache.Client.Get(ctx, key).Bytes()
 	if err != nil {
 		log.Printf("error reading from cache: %v", err)
 		return nil, false
@@ -33,7 +37,7 @@ func (cache *RedisImageCache) Get(ctx context.Context, key string) ([]byte, bool
 }
 
 func (cache *RedisImageCache) Contains(ctx context.Context, key string) bool {
-	if _, err := cache.client.Get(ctx, key).Bytes(); err != nil {
+	if _, err := cache.Client.Get(ctx, key).Bytes(); err != nil {
 		log.Printf("error reading from cache: %v", err)
 		return false
 	}
@@ -42,7 +46,7 @@ func (cache *RedisImageCache) Contains(ctx context.Context, key string) bool {
 }
 
 func (cache *RedisImageCache) Add(ctx context.Context, key string, data []byte) bool {
-	if err := cache.client.Set(ctx, key, data, 0).Err(); err != nil {
+	if err := cache.Client.Set(ctx, key, data, cache.settings.Service.ImageCacheTTL).Err(); err != nil {
 		log.Printf("error saving to cache: %v", err)
 		return false
 	}
