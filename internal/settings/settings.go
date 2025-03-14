@@ -10,6 +10,7 @@ import (
 
 type ServiceSettings struct {
 	ImageCacheSize     int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
+	ImageCacheTTL      time.Duration `envconfig:"SVC_IMG_CACHE_SIZE" default:"1h"`
 	AsyncResize        bool          `envconfig:"SVC_ASYNC_RESIZE" default:"true"`
 	ImageResizeTimeout time.Duration `envconfig:"SVC_IMG_RESIZE_TIMEOUT" default:"5s"`
 	MaxImageSize       int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
