@@ -10,11 +10,11 @@ import (
 
 	chi "github.com/go-chi/chi/v5"
 
-	"github.com/okulik/fm-go/internal/cache"
-	"github.com/okulik/fm-go/internal/image"
-	"github.com/okulik/fm-go/internal/model"
-	"github.com/okulik/fm-go/internal/rest"
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/model"
+	"github.com/okulik/img-resize/internal/rest"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 var json string = `{

@@ -15,9 +15,9 @@ import (
 
 	jpgresize "github.com/nfnt/resize"
 
-	"github.com/okulik/fm-go/internal/cache"
-	"github.com/okulik/fm-go/internal/model"
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/model"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 const (

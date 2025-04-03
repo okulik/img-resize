@@ -15,6 +15,11 @@ func NewLRUImageCache(size int) (ImageCacheAdapter, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return &LRUImageCache{cache}, nil
+}
+
+func NewLRUImageCacheWithCacheImpl(cache *lru.Cache) (ImageCacheAdapter, error) {
 	return &LRUImageCache{cache}, nil
 }
 
@@ -31,6 +36,6 @@ func (cache *LRUImageCache) Contains(_ context.Context, key string) bool {
 	return cache.Cache.Contains(key)
 }
 
-func (cache *LRUImageCache) Add(_ context.Context, key string, data []byte) bool {
-	return cache.Cache.Add(key, data)
+func (cache *LRUImageCache) Add(_ context.Context, key string, value any) bool {
+	return cache.Cache.Add(key, value)
 }

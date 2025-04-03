@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 func TestEnvLoadEnvFile(t *testing.T) {

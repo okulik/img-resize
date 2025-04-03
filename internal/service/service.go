@@ -12,9 +12,9 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/okulik/fm-go/internal/cache"
-	"github.com/okulik/fm-go/internal/image"
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 type Service struct {

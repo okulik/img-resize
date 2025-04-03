@@ -8,7 +8,7 @@ ifndef VERBOSE
 MAKEFLAGS += --silent
 endif
 
-SVCNAME=resizer
+SVCNAME=img-resize
 AUTH_USERNAME=admin
 AUTH_PASSWORD=admin
 APP_ENV=test

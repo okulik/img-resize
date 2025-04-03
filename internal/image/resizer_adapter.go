@@ -3,7 +3,7 @@ package image
 import (
 	"context"
 
-	"github.com/okulik/fm-go/internal/model"
+	"github.com/okulik/img-resize/internal/model"
 )
 
 type ImageResizer interface {

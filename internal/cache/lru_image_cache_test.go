@@ -4,11 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/okulik/fm-go/internal/cache"
+	lru "github.com/hashicorp/golang-lru"
+	"github.com/okulik/img-resize/internal/cache"
 )
 
-func TestGet(t *testing.T) {
-	cache, err := cache.NewLRUImageCache(100)
+func TestLRUImageCacheGet(t *testing.T) {
+	c, _ := NewMockCache(1)
+	cache, err := cache.NewLRUImageCacheWithCacheImpl(c)
 	if err != nil {
 		t.Error("error allocating LRUImageCache")
 	}
@@ -20,7 +22,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestAdd(t *testing.T) {
+func TestLRUImageCacheAdd(t *testing.T) {
 	cache, err := cache.NewLRUImageCache(2)
 	if err != nil {
 		t.Error("error allocating LRUImageCache")
@@ -45,7 +47,7 @@ func TestAdd(t *testing.T) {
 	}
 }
 
-func TestContains(t *testing.T) {
+func TestLRUImageCacheContains(t *testing.T) {
 	cache, err := cache.NewLRUImageCache(100)
 	if err != nil {
 		t.Error("error allocating LRUImageCache")
@@ -55,4 +57,18 @@ func TestContains(t *testing.T) {
 	if !cache.Contains(context.Background(), "foo") {
 		t.Error("get method returning unexpected value")
 	}
+}
+
+type MockCache lru.Cache
+
+func NewMockCache(size int) (*lru.Cache, error) {
+	return lru.New(size)
+}
+
+func (mc *MockCache) Get(key any) (value any, ok bool) {
+	if key == "foo" {
+		return "bar", true
+	}
+
+	return nil, false
 }

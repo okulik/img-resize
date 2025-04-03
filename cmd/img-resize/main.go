@@ -3,10 +3,10 @@ package main
 import (
 	"log"
 
-	"github.com/okulik/fm-go/internal/cache"
-	"github.com/okulik/fm-go/internal/image"
-	"github.com/okulik/fm-go/internal/service"
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/service"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 	}
 
 	//cache, err := cache.NewLRUImageCache(settings.Service.ImageCacheSize)
-	cache, err := cache.NewRedisImageCache(settings)
+	cache, err := cache.NewRedisImageCache(nil, settings)
 	if err != nil {
 		log.Panicf("Faild to create image cache: %v", err)
 	}

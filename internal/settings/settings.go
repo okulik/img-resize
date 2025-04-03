@@ -25,7 +25,7 @@ type HttpSettings struct {
 	ServerReadTimeout             time.Duration `envconfig:"HTTP_SERVER_READ_TIMEOUT" default:"10s"`
 	ServerWriteTimeout            time.Duration `envconfig:"HTTP_SERVER_WRITE_TIMEOUT" default:"20s"`
 	ClientReadTimeout             time.Duration `envconfig:"HTTP_CLIENT_READ_TIMEOUT" default:"10s"`
-	ClientUserAgent               string        `envconfig:"HTTP_CLIENT_USER_AGENT" default:"fm-go"`
+	ClientUserAgent               string        `envconfig:"HTTP_CLIENT_USER_AGENT" default:"img-resize"`
 }
 
 type AuthSettings struct {

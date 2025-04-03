@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/okulik/fm-go/internal/model"
+	"github.com/okulik/img-resize/internal/model"
 )
 
 func TestNewResizeRequestFromJSON(t *testing.T) {

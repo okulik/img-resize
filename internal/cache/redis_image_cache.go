@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/settings"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -14,12 +14,14 @@ type RedisImageCache struct {
 	settings *settings.Settings
 }
 
-func NewRedisImageCache(settings *settings.Settings) (ImageCacheAdapter, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", settings.Service.RedisHost, settings.Service.RedisPort),
-		Password: "",
-		DB:       0,
-	})
+func NewRedisImageCache(client *redis.Client, settings *settings.Settings) (ImageCacheAdapter, error) {
+	if client == nil {
+		client = redis.NewClient(&redis.Options{
+			Addr:     fmt.Sprintf("%s:%d", settings.Service.RedisHost, settings.Service.RedisPort),
+			Password: "",
+			DB:       0,
+		})
+	}
 	return &RedisImageCache{
 		Client:   client,
 		settings: settings,
@@ -45,8 +47,8 @@ func (cache *RedisImageCache) Contains(ctx context.Context, key string) bool {
 	return true
 }
 
-func (cache *RedisImageCache) Add(ctx context.Context, key string, data []byte) bool {
-	if err := cache.Client.Set(ctx, key, data, cache.settings.Service.ImageCacheTTL).Err(); err != nil {
+func (cache *RedisImageCache) Add(ctx context.Context, key string, value any) bool {
+	if err := cache.Client.Set(ctx, key, value, cache.settings.Service.ImageCacheTTL).Err(); err != nil {
 		log.Printf("error saving to cache: %v", err)
 		return false
 	}

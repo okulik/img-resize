@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 func TestSettingsLoad(t *testing.T) {

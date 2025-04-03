@@ -1,14 +1,8 @@
-# Field Materials Backend Interview HWA
+# Image resizer
 
-Several improvements were made to enhance code readability and production readiness:
-- The codebase was reorganized into separate files and packages, following Go best practices.
-- A new `/health` endpoint was added, a common requirement for ECS, Kubernetes, and similar environments.
-- Basic authentication was enforced on all endpoints (except `/health`).
-- A Makefile was introduced to automate common development tasks such as running tests, refreshing dependencies, and running the service in a Docker container.
-- A Dockerfile was created to easily build and test a production-ready image of the service.
-- Several environment variables were introduced to simplify service configuration. Refer to `internal/settings/settings.go` for a comprehensive and (hopefully) self-explanatory list.
+An HTTP-based service with a simple API for resizing images. It supports blocking and non-blocking modes of downloading and resizing images. Also, it supports two types of resized images caches - a simple in-memory cache, and a Redis-based one.
 
-## Build & Run Server
+## Build & Run Service
 
 ### Running it locally
 ```bash
@@ -35,10 +29,9 @@ curl -u admin:admin \
   --output a.jpg | open a.jpg
 ```
 
-# A wish list
+## A wish list
 
-There's a number of important features that are currently missing in the current implementation. For instance, we're not utilizing any external error tracking or monitoring services and we're not employing any tracing or metrics collection tools. Follows a list of features that would make the service more useful, maintainable, and production-ready.
-
+There's a number of important features that are currently missing in the current implementation. For instance, there's no any external error tracking nor telemetry. Here's a wish-list of features that would make the service more useful, maintainable, and production-ready:
 - **Error Tracking Service Integration**: Incorporate an external error tracking service like Sentry or Honeybadger for reporting service errors.
 - **Telemetry Implementation**: Integrate tracing using tools like New Relic, Datadog, Jaeger, or Tempo to trace requests. Also incorporate metrics and monitoring utilizing New Relic, Datadog, Prometheus, VictoriaMetrics, or Grafana and add logging, utilizing a structured logging library like [zap](https://github.com/uber-go/zap) or slog.
 - **Containerized Deployment**: Run the service in a containerized environment (AWS ECS, k8s) and behind a load balancer, for scaling purpose. Deploy the container image to a private registry like AWS ECR or GCP Artifact Registry rather than GitHub Container Registry.

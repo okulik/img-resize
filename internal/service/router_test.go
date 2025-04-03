@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	chi "github.com/go-chi/chi/v5"
-	"github.com/okulik/fm-go/internal/cache"
-	"github.com/okulik/fm-go/internal/image"
-	"github.com/okulik/fm-go/internal/service"
-	"github.com/okulik/fm-go/internal/settings"
+	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/service"
+	"github.com/okulik/img-resize/internal/settings"
 )
 
 func TestRouterWithResizeEndpoint(t *testing.T) {
