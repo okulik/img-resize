@@ -72,7 +72,7 @@ docker-compose-run: deps ## Builds and runs docker compose services
 	docker compose up -d
 
 $(TOOLSBIN)/golangci-lint:  ## Installs golang linter
-	scripts/install-golangci-lint $(TOOLSBIN) v1.64.6
+	scripts/install-golangci-lint $(TOOLSBIN) v2.12.2
 
 .PHONY: help
 help: ## Displays this banner

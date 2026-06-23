@@ -20,10 +20,10 @@ func LoadEnvFile(environment string) error {
 		return err
 	}
 
-	switch {
-	case environment == Development:
+	switch environment {
+	case Development:
 		loadEnvFileFromFolder(currentDir, ".env.dev")
-	case environment == Test:
+	case Test:
 		loadEnvFileFromFolder(currentDir, ".env.test")
 	}
 

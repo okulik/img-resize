@@ -8,6 +8,5 @@ INSTALL_DIR=${1?$USAGE}
 VERSION=${2?$USAGE}
 
 echo "Installing to ${INSTALL_DIR}/golangci-lint ..."
-curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${INSTALL_DIR} $VERSION
-
+curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ${INSTALL_DIR} $VERSION
 ${INSTALL_DIR}/golangci-lint --version
