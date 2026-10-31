@@ -97,7 +97,7 @@ fly machine clone -a img-resize-worker <machine-id>   # run 4 times
 fly machine list -a img-resize-worker
 ```
 
-Expected: 5 machines. The autoscaler keeps at least one running and stops the rest when the queue is empty. Do not use `fly scale count` for this, because it fights the autoscaler.
+Expected: 5 machines. The autoscaler's formula, `max(1, min(5, ceil(backlog / 30)))`, sets how many run: the `max(1, ...)` floor keeps one worker running when the queue is empty, and the rest are stopped. Do not use `fly scale count` for this, because it fights the autoscaler.
 
 ## 6. Deploy the autoscaler
 
@@ -127,5 +127,7 @@ Roll back by redeploying an earlier release:
 fly releases -a img-resize-web
 fly deploy -c deploy/fly/web.toml --image <earlier image ref from the releases list>
 ```
+
+A later `fly deploy` of the worker app updates every worker machine, stopped ones included. Fly's docs don't say whether a stopped machine stays stopped afterwards, so check `fly status -a img-resize-worker` after a deploy. The autoscaler re-applies the formula on its next run and starts or stops machines to match.
 
 To stop autoscaling quickly, stop the autoscaler machine (`fly machine stop -a img-resize-autoscaler <machine-id>`). Workers then stay in whatever state they are in.

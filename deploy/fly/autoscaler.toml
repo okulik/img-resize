@@ -6,7 +6,8 @@ primary_region = "fra"
 
 [env]
   FAS_APP_NAME = "img-resize-worker"
-  FAS_STARTED_MACHINE_COUNT = "min(5, ceil(backlog / 30))"
+  # The max(1, ...) floor keeps one worker on when the queue is empty.
+  FAS_STARTED_MACHINE_COUNT = "max(1, min(5, ceil(backlog / 30)))"
   FAS_PROMETHEUS_METRIC_NAME = "backlog"
   FAS_PROMETHEUS_ADDRESS = "https://api.fly.io/prometheus/personal"
   # Queue depth times average job duration, with a 1s fallback when no jobs have run.
