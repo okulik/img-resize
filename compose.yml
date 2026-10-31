@@ -19,7 +19,7 @@ services:
       - redis
 
   redis:
-    image: redis:8.0-M03-alpine
+    image: redis:8.10.3-alpine
     command: redis-server --requirepass ${SVC_REDIS_PASSWORD:-resizer-dev}
     ports:
       - target: "6379"
