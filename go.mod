@@ -1,23 +1,20 @@
 module github.com/okulik/img-resize
 
-go 1.26
+go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/chi/v5 v5.5.0
+	github.com/go-redis/redismock/v9 v9.2.0
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/joho/godotenv v1.5.1
+	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/pkg/errors v0.9.1
-)
-
-require (
-	github.com/go-redis/redismock/v9 v9.2.0
-	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/redis/go-redis/v9 v9.21.0
+	github.com/redis/go-redis/v9 v9.23.0
 )
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )

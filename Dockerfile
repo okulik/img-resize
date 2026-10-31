@@ -1,4 +1,4 @@
-FROM golang:1.23.6-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 WORKDIR /app
 ADD . .
@@ -14,7 +14,7 @@ RUN adduser \
 RUN apk add build-base curl
 RUN make build-prod
 
-FROM golang:1.23.6-alpine
+FROM golang:1.27.3-alpine
 
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
