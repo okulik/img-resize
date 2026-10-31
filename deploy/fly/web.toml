@@ -12,7 +12,9 @@ kill_timeout = 30
   SVC_MAX_IMG_PROGRESSIVE_PIXELS = "6000000"
   SVC_MAX_IMG_SOURCE_DIMENSION = "8192"
   SVC_IMG_CACHE_TTL = "15m"
+  SVC_MAX_QUEUE_DEPTH = "2000"
   HTTP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT = "20s"
+  GOMEMLIMIT = "200MiB"
 
 [http_service]
   internal_port = 4000
@@ -20,6 +22,11 @@ kill_timeout = 30
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
 
   [[http_service.checks]]
     method = "GET"
