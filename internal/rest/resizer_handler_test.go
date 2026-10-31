@@ -2,6 +2,7 @@ package rest_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +70,48 @@ func TestResizeImageAsync(t *testing.T) {
 
 	if !strings.Contains(testRecorder.Body.String(), "def456") {
 		t.Fatalf("unexpected image id")
+	}
+}
+
+func TestResizeImageDimensionLimit(t *testing.T) {
+	t.Setenv("SVC_MAX_IMG_DIMENSION", "100")
+
+	tests := []struct {
+		name   string
+		width  uint
+		height uint
+		want   int
+	}{
+		{"both within limit", 100, 100, http.StatusCreated},
+		{"width above limit", 101, 0, http.StatusBadRequest},
+		{"height above limit", 0, 101, http.StatusBadRequest},
+		{"overflowing width", 4294967295, 0, http.StatusBadRequest},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"urls":["https://example.com/a.jpg"],"width":%d,"height":%d}`, test.width, test.height)
+			for _, path := range []string{"/v1/resize", "/v1/resize?async=true"} {
+				req, err := http.NewRequest("POST", path, strings.NewReader(body))
+				if err != nil {
+					t.Fatalf("unexpected error %v", err)
+				}
+
+				testRecorder := httptest.NewRecorder()
+				router := chi.NewRouter()
+				router.Post("/v1/resize", buildResizerHandler().ResizeImage)
+				router.ServeHTTP(testRecorder, req)
+
+				want := test.want
+				if want == http.StatusCreated && path != "/v1/resize" {
+					want = http.StatusOK
+				}
+
+				if testRecorder.Code != want {
+					t.Errorf("%s: unexpected status code: got %v want %v", path, testRecorder.Code, want)
+				}
+			}
+		})
 	}
 }
 

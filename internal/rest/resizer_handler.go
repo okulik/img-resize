@@ -58,6 +58,13 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit the requested dimensions, as memory use grows with the output size
+	maxDimension := rh.settings.Service.MaxImageDimension
+	if resizeReq.Width > maxDimension || resizeReq.Height > maxDimension {
+		web.WriteErrorResponse(w, errors.Errorf("image width and height are limited to %d", maxDimension), http.StatusBadRequest)
+		return
+	}
+
 	if isAsyncResize(r) {
 		if !rh.settings.Service.AsyncResize {
 			web.WriteErrorResponse(w, errors.New("async resize is disabled"), http.StatusFailedDependency)
