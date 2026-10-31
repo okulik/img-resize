@@ -22,6 +22,8 @@ type ServiceSettings struct {
 	RedisPassword           string        `envconfig:"SVC_REDIS_PASSWORD"`
 	JobStateTTL             time.Duration `envconfig:"SVC_JOB_STATE_TTL" default:"1h"`
 	FailedJobTTL            time.Duration `envconfig:"SVC_FAILED_JOB_TTL" default:"5m"`
+	JobClaimIdle            time.Duration `envconfig:"SVC_JOB_CLAIM_IDLE" default:"60s"`
+	JobMaxAttempts          int64         `envconfig:"SVC_JOB_MAX_ATTEMPTS" default:"3"`
 	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
 }
 

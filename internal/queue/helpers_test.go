@@ -25,3 +25,20 @@ func (r *redisHandle) setFailed(t *testing.T, id, msg string, ttl time.Duration)
 		t.Fatalf("expiring failed state: %v", err)
 	}
 }
+
+// subscribeDone subscribes to the completion channel and waits for the
+// subscription to be confirmed, so no message published afterwards is missed.
+func (r *redisHandle) subscribeDone(t *testing.T) *redis.PubSub {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sub := r.Subscribe(ctx, "resize:done")
+	t.Cleanup(func() { _ = sub.Close() })
+	if _, err := sub.Receive(ctx); err != nil {
+		t.Fatalf("subscribing: %v", err)
+	}
+
+	return sub
+}
