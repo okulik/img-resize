@@ -45,10 +45,12 @@ func (l *Limiter) Allow(ctx context.Context, bucket, key string, amount, limit i
 }
 
 // ClientIP returns the address of the client that sent r. Fly-Client-IP is used
-// only when trustFly is set, as any client can send it otherwise.
+// only when trustFly is set, as any client can send it otherwise, and only when
+// it holds an address.
 func ClientIP(r *http.Request, trustFly bool) string {
 	if trustFly {
-		if ip := r.Header.Get("Fly-Client-IP"); ip != "" {
+		ip := r.Header.Get("Fly-Client-IP")
+		if _, err := netip.ParseAddr(ip); err == nil {
 			return ip
 		}
 	}

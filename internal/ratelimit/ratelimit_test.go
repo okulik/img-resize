@@ -69,6 +69,26 @@ func TestClientIPUsesHeaderWhenTrusted(t *testing.T) {
 	}
 }
 
+func TestClientIPFallsBackOnUnparsableHeader(t *testing.T) {
+	for _, header := range []string{"not-an-ip", "203.0.113.9, 198.51.100.7", "203.0.113.9:5555", " 203.0.113.9"} {
+		t.Run(header, func(t *testing.T) {
+			got := ratelimit.ClientIP(clientIPRequest(header), true)
+
+			if got != "198.51.100.1" {
+				t.Errorf("unexpected ip: %q", got)
+			}
+		})
+	}
+}
+
+func TestClientIPUsesIPv6HeaderWhenTrusted(t *testing.T) {
+	got := ratelimit.ClientIP(clientIPRequest("2001:db8::1"), true)
+
+	if got != "2001:db8::1" {
+		t.Errorf("unexpected ip: %q", got)
+	}
+}
+
 func TestClientIPFallsBackWithoutHeader(t *testing.T) {
 	got := ratelimit.ClientIP(clientIPRequest(""), true)
 
