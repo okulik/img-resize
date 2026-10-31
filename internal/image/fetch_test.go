@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +23,9 @@ func TestFetchBlocksInternalAddress(t *testing.T) {
 
 	resizer := NewResizer(buildFetchSettings(false), nil)
 
-	if _, err := resizer.fetch(context.Background(), source.URL); err == nil {
-		t.Error("expected fetching an internal address to fail")
+	_, err := resizer.fetch(context.Background(), source.URL)
+	if !errors.Is(err, errInternalAddress) {
+		t.Errorf("expected an internal address error: got %v", err)
 	}
 
 	if got := requests.Load(); got != 0 {

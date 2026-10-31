@@ -1,6 +1,7 @@
 package image
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +10,11 @@ import (
 	"time"
 
 	"github.com/okulik/img-resize/internal/settings"
+)
+
+var (
+	errInternalAddress   = errors.New("connecting to an internal address is not allowed")
+	errUnsupportedScheme = errors.New("unsupported URL scheme")
 )
 
 // Non-public ranges that netip.Addr has no predicate for.
@@ -49,7 +55,7 @@ func newHTTPClient(settings *settings.Settings) *http.Client {
 
 func rejectInternalAddress(_ string, address string, _ syscall.RawConn) error {
 	if isInternalAddress(address) {
-		return fmt.Errorf("connecting to internal address %s is not allowed", address)
+		return fmt.Errorf("%w: %s", errInternalAddress, address)
 	}
 
 	return nil

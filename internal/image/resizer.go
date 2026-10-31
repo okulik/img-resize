@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image/jpeg"
 	"io"
@@ -149,7 +150,7 @@ func (r *Resizer) processImageResize(ctx context.Context, url string, width uint
 	}
 
 	// Retrieve the image from the url
-	data, err := r.fetchAndResize(ctx, url, width, height)
+	data, err := r.Resize(ctx, url, width, height)
 	if err != nil {
 		log.Printf("failed to resize %s: %v", url, err)
 		return model.ResizeResponse{Result: statusFailure}, err
@@ -163,7 +164,9 @@ func (r *Resizer) processImageResize(ctx context.Context, url string, width uint
 	return model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: false}, nil
 }
 
-func (r *Resizer) fetchAndResize(ctx context.Context, url string, width uint, height uint) ([]byte, error) {
+// Fetches an image and resizes it, without touching the cache. Every error is
+// a *Failure.
+func (r *Resizer) Resize(ctx context.Context, url string, width uint, height uint) ([]byte, error) {
 	data, err := r.fetch(ctx, url)
 	if err != nil {
 		return nil, err
@@ -175,26 +178,52 @@ func (r *Resizer) fetchAndResize(ctx context.Context, url string, width uint, he
 func (r *Resizer) fetch(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, permanent(ReasonFetch, err)
+	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return nil, permanent(ReasonFetch, fmt.Errorf("%w: %q", errUnsupportedScheme, req.URL.Scheme))
 	}
 	req.Header.Set("User-Agent", r.settings.Http.ClientUserAgent)
 	log.Print("fetching ", url)
 	res, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("image fetch failed: %v", err)
+		err = fmt.Errorf("image fetch failed: %w", err)
+		if errors.Is(err, errInternalAddress) {
+			return nil, permanent(ReasonFetch, err)
+		}
+
+		return nil, transient(ReasonFetch, err)
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("non-200 status: %d", res.StatusCode)
+		err = fmt.Errorf("non-200 status: %d", res.StatusCode)
+		if isTransientStatus(res.StatusCode) {
+			return nil, transient(ReasonFetch, err)
+		}
+
+		return nil, permanent(ReasonFetch, err)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(res.Body, r.settings.Service.MaxImageSize))
+	// read one byte more than allowed, so that an oversized body is detected
+	// instead of silently truncated
+	maxSize := r.settings.Service.MaxImageSize
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image data: %v", err)
+		return nil, transient(ReasonFetch, fmt.Errorf("failed to read image data: %w", err))
+	}
+
+	if int64(len(data)) > maxSize {
+		return nil, permanent(ReasonTooLarge, fmt.Errorf("image exceeds the size limit of %d bytes", maxSize))
 	}
 
 	return data, nil
+}
+
+// Reports whether a source answering with the status may answer differently
+// later.
+func isTransientStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status == http.StatusRequestTimeout || status >= 500
 }
 
 func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
@@ -202,32 +231,32 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 	// of the pixels and a small file can declare a very large image
 	config, err := jpeg.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode jpeg config: %v", err)
+		return nil, permanent(ReasonInvalid, fmt.Errorf("failed to decode jpeg config: %w", err))
 	}
 
 	if int64(config.Width)*int64(config.Height) > r.settings.Service.MaxImagePixels {
-		return nil, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height)
+		return nil, permanent(ReasonTooLarge, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height))
 	}
 
 	if config.Width == 0 || config.Height == 0 {
-		return nil, fmt.Errorf("image size %dx%d is empty", config.Width, config.Height)
+		return nil, permanent(ReasonInvalid, fmt.Errorf("image size %dx%d is empty", config.Width, config.Height))
 	}
 
 	maxSourceDimension := int(r.settings.Service.MaxImageSourceDimension)
 	if config.Width > maxSourceDimension || config.Height > maxSourceDimension {
-		return nil, fmt.Errorf("image size %dx%d exceeds the source dimension limit", config.Width, config.Height)
+		return nil, permanent(ReasonTooLarge, fmt.Errorf("image size %dx%d exceeds the source dimension limit", config.Width, config.Height))
 	}
 
 	maxDimension := r.settings.Service.MaxImageDimension
 	outWidth, outHeight := outputSize(uint(config.Width), uint(config.Height), width, height)
 	if outWidth > maxDimension || outHeight > maxDimension {
-		return nil, fmt.Errorf("resized image size %dx%d exceeds the dimension limit", outWidth, outHeight)
+		return nil, permanent(ReasonTooLarge, fmt.Errorf("resized image size %dx%d exceeds the dimension limit", outWidth, outHeight))
 	}
 
 	// decode jpeg into image.Image
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode jpeg: %v", err)
+		return nil, permanent(ReasonInvalid, fmt.Errorf("failed to decode jpeg: %w", err))
 	}
 
 	// if either width or height is 0, it will resize respecting the aspect ratio
@@ -236,7 +265,7 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 	newData := bytes.Buffer{}
 	err = jpeg.Encode(bufio.NewWriter(&newData), newImage, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to jpeg encode resized image: %v", err)
+		return nil, permanent(ReasonInvalid, fmt.Errorf("failed to jpeg encode resized image: %w", err))
 	}
 
 	return newData.Bytes(), nil
