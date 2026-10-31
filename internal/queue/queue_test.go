@@ -24,13 +24,22 @@ func newQueue(t *testing.T) (*queue.Queue, *redisHandle) {
 func newQueueWithClaimIdle(t *testing.T, claimIdle time.Duration) (*queue.Queue, *redisHandle) {
 	t.Helper()
 
+	return newQueueWith(t, func(s *settings.ServiceSettings) { s.JobClaimIdle = claimIdle })
+}
+
+func newQueueWith(t *testing.T, tweak func(*settings.ServiceSettings)) (*queue.Queue, *redisHandle) {
+	t.Helper()
+
 	client := testredis.Client(t, 2)
-	cfg := &settings.Settings{Service: &settings.ServiceSettings{
-		JobStateTTL:    time.Hour,
-		FailedJobTTL:   5 * time.Minute,
-		JobClaimIdle:   claimIdle,
-		JobMaxAttempts: 3,
-	}}
+	svc := &settings.ServiceSettings{
+		JobStateTTL:       time.Hour,
+		FailedJobTTL:      5 * time.Minute,
+		JobClaimIdle:      time.Hour,
+		JobMaxAttempts:    3,
+		WorkerConcurrency: 1,
+	}
+	tweak(svc)
+	cfg := &settings.Settings{Service: svc}
 
 	return queue.New(client, cfg), &redisHandle{client}
 }
@@ -604,5 +613,116 @@ func TestEnsureGroupSeesExistingJobs(t *testing.T) {
 	d, err := q.Read(ctx, "w1", time.Second)
 	if err != nil || d == nil || d.Job != job {
 		t.Fatalf("delivery = %+v err = %v, want job %+v", d, err, job)
+	}
+}
+
+func otherJob() model.Job {
+	return model.Job{
+		ID:     model.ImageID("http://example.com/b.jpg", 100, 50),
+		URL:    "http://example.com/b.jpg",
+		Width:  100,
+		Height: 50,
+	}
+}
+
+func TestReclaimClaimsOnlyWorkerConcurrencyJobs(t *testing.T) {
+	q, r, _ := readyQueue(t, 10*time.Millisecond)
+	ctx := context.Background()
+	if _, err := q.Submit(ctx, otherJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if d, _ := q.Read(ctx, "w1", time.Second); d == nil {
+			t.Fatal("delivery = nil, want job")
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	got, abandoned, err := q.Reclaim(ctx, "w2")
+	if err != nil || len(got) != 1 || abandoned != 0 {
+		t.Fatalf("deliveries = %d abandoned = %d err = %v, want 1 and 0", len(got), abandoned, err)
+	}
+
+	pending, err := r.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: "resize:jobs", Group: "resize-workers", Start: "-", End: "+", Count: 10,
+	}).Result()
+	if err != nil || len(pending) != 2 {
+		t.Fatalf("pending = %d err = %v, want 2", len(pending), err)
+	}
+	for _, p := range pending {
+		want := int64(1)
+		if p.ID == got[0].MessageID {
+			want = 2
+		}
+		if p.RetryCount != want {
+			t.Fatalf("message %s delivery count = %d, want %d", p.ID, p.RetryCount, want)
+		}
+	}
+}
+
+func TestReclaimSkipsAbandonedToFindRunnableJob(t *testing.T) {
+	q, _ := newQueueWith(t, func(s *settings.ServiceSettings) {
+		s.JobClaimIdle = 10 * time.Millisecond
+		s.JobMaxAttempts = 2
+	})
+	ctx := context.Background()
+	if err := q.EnsureGroup(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The first job runs twice and crashes both times.
+	if _, err := q.Submit(ctx, testJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d, _ := q.Read(ctx, "w1", time.Second); d == nil {
+		t.Fatal("delivery = nil, want job")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got, _, err := q.Reclaim(ctx, "w1"); err != nil || len(got) != 1 {
+		t.Fatalf("deliveries = %d err = %v, want 1", len(got), err)
+	}
+
+	// The second job sits behind it in the pending list.
+	if _, err := q.Submit(ctx, otherJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d, _ := q.Read(ctx, "w1", time.Second); d == nil {
+		t.Fatal("delivery = nil, want job")
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	got, abandoned, err := q.Reclaim(ctx, "w2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if abandoned != 1 || len(got) != 1 || got[0].Job != otherJob() {
+		t.Fatalf("deliveries = %+v abandoned = %d, want the second job and 1 abandoned", got, abandoned)
+	}
+}
+
+func TestReclaimSkipsMalformedToFindRunnableJob(t *testing.T) {
+	q, r := newQueueWithClaimIdle(t, 10*time.Millisecond)
+	ctx := context.Background()
+	if err := q.EnsureGroup(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err := r.XAdd(ctx, &redis.XAddArgs{Stream: "resize:jobs", Values: map[string]any{"id": "x"}}).Err()
+	if err != nil {
+		t.Fatalf("adding entry: %v", err)
+	}
+	if _, err := q.Submit(ctx, testJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := r.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: "resize-workers", Consumer: "w1", Streams: []string{"resize:jobs", ">"}, Count: 2,
+	}).Err(); err != nil {
+		t.Fatalf("reading raw: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	got, _, err := q.Reclaim(ctx, "w2")
+	if err != nil || len(got) != 1 || got[0].Job != testJob() {
+		t.Fatalf("deliveries = %+v err = %v, want the valid job", got, err)
 	}
 }
