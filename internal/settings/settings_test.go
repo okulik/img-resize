@@ -8,6 +8,24 @@ import (
 	"github.com/okulik/img-resize/internal/settings"
 )
 
+func TestSettingsLoadCacheSizeAndTTLSeparately(t *testing.T) {
+	t.Setenv("SVC_IMG_CACHE_SIZE", "2048")
+	t.Setenv("SVC_IMG_CACHE_TTL", "2h")
+
+	settings, err := settings.Load()
+	if err != nil {
+		t.Fatalf("unable to load settings: %v", err)
+	}
+
+	if settings.Service.ImageCacheSize != 2048 {
+		t.Error("unexpected value for SVC_IMG_CACHE_SIZE")
+	}
+
+	if settings.Service.ImageCacheTTL != time.Hour*2 {
+		t.Error("unexpected value for SVC_IMG_CACHE_TTL")
+	}
+}
+
 func TestSettingsLoad(t *testing.T) {
 	os.Setenv("HTTP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT", "123s")
 	os.Setenv("HTTP_SERVER_PORT", "8080")
