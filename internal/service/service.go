@@ -78,7 +78,7 @@ func (svc *Service) handleSignals(server *http.Server) error {
 	// Create a channel to listen for an interrupt or terminate signals
 	// from the OS.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 	sig := <-sigs
 	log.Printf("received signal %s, shutting down\n", sig.String())
 
