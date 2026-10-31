@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"image/jpeg"
 	"io"
@@ -73,7 +71,7 @@ func (r *Resizer) Start() {
 
 			for job := range r.resizeJobs {
 				_, _ = r.processImageResize(context.Background(), job.URL, job.Width, job.Height)
-				r.resizingProgress.DeleteResizing(genImageID(job.URL, job.Width, job.Height))
+				r.resizingProgress.DeleteResizing(model.ImageID(job.URL, job.Width, job.Height))
 			}
 		}()
 	}
@@ -99,7 +97,7 @@ func (r *Resizer) ProcessAsync(request *model.ResizeRequest) []model.ResizeRespo
 	results := make([]model.ResizeResponse, 0, len(request.URLs))
 
 	for _, url := range request.URLs {
-		imageID := genImageID(url, request.Width, request.Height)
+		imageID := model.ImageID(url, request.Width, request.Height)
 
 		// Check if the image is cached
 		if r.imageCache.Contains(context.Background(), imageID) {
@@ -143,7 +141,7 @@ func (r *Resizer) ResizingProgress() *ResizingProgress {
 }
 
 func (r *Resizer) processImageResize(ctx context.Context, url string, width uint, height uint) (model.ResizeResponse, error) {
-	imageID := genImageID(url, width, height)
+	imageID := model.ImageID(url, width, height)
 
 	// First check if the image is already cached
 	if r.imageCache.Contains(ctx, imageID) {
@@ -269,9 +267,4 @@ func (r *Resizer) trySendResizeJob(url string, width uint, height uint) bool {
 	default:
 		return false
 	}
-}
-
-func genImageID(url string, width uint, height uint) string {
-	sha := sha256.Sum256([]byte(fmt.Sprintf("%s,%d,%d", url, width, height)))
-	return hex.EncodeToString(sha[:])
 }
