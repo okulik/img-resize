@@ -18,6 +18,7 @@ type ServiceSettings struct {
 	MaxImagePixels     int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
 	RedisHost          string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
 	RedisPort          int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
+	RedisPassword      string        `envconfig:"SVC_REDIS_PASSWORD"`
 }
 
 type HttpSettings struct {

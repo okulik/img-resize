@@ -18,7 +18,7 @@ func NewRedisImageCache(client *redis.Client, settings *settings.Settings) (Imag
 	if client == nil {
 		client = redis.NewClient(&redis.Options{
 			Addr:     fmt.Sprintf("%s:%d", settings.Service.RedisHost, settings.Service.RedisPort),
-			Password: "",
+			Password: settings.Service.RedisPassword,
 			DB:       0,
 		})
 	}

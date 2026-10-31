@@ -79,6 +79,20 @@ func TestRedisImageCacheContains(t *testing.T) {
 	}
 }
 
+func TestNewRedisImageCacheUsesConfiguredPassword(t *testing.T) {
+	settings := buildSettings(0)
+	settings.Service.RedisPassword = "secret"
+
+	imageCache, err := cache.NewRedisImageCache(nil, settings)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	if got := imageCache.(*cache.RedisImageCache).Options().Password; got != "secret" {
+		t.Errorf("unexpected redis password: %q", got)
+	}
+}
+
 func buildSettings(ttl time.Duration) *settings.Settings {
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{

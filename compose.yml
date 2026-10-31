@@ -9,6 +9,7 @@ services:
       - AUTH_USERNAME=admin
       - AUTH_PASSWORD=admin
       - SVC_REDIS_HOST=redis
+      - SVC_REDIS_PASSWORD=${SVC_REDIS_PASSWORD:-resizer-dev}
     ports:
       - target: "4000"
         published: "4000"
@@ -19,7 +20,7 @@ services:
 
   redis:
     image: redis:8.0-M03-alpine
-    command: redis-server
+    command: redis-server --requirepass ${SVC_REDIS_PASSWORD:-resizer-dev}
     ports:
       - target: "6379"
         published: "6379"
