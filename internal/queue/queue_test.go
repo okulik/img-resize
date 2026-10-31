@@ -357,18 +357,27 @@ func TestCompletePublishesID(t *testing.T) {
 	ctx := context.Background()
 
 	sub := r.subscribeDone(t)
+	r.publishForeignDone(t)
 	d, _ := q.Read(ctx, "w1", time.Second)
 	if err := q.Complete(ctx, *d); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	msg, err := sub.ReceiveMessage(ctx)
-	if err != nil {
-		t.Fatalf("receiving: %v", err)
+	r.waitDone(t, sub, job.ID)
+}
+
+func TestFailPublishesID(t *testing.T) {
+	q, r, job := readyQueue(t, time.Hour)
+	ctx := context.Background()
+
+	sub := r.subscribeDone(t)
+	r.publishForeignDone(t)
+	d, _ := q.Read(ctx, "w1", time.Second)
+	if err := q.Fail(ctx, *d, "fetch failed"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if msg.Payload != job.ID {
-		t.Fatalf("payload = %q, want %q", msg.Payload, job.ID)
-	}
+
+	r.waitDone(t, sub, job.ID)
 }
 
 func TestFailStoresError(t *testing.T) {
