@@ -99,7 +99,17 @@ fly machine list -a img-resize-worker
 
 Expected: 5 machines. The autoscaler's formula, `max(1, min(5, ceil(backlog / 30)))`, sets how many run: the `max(1, ...)` floor keeps one worker running when the queue is empty, and the rest are stopped. Do not use `fly scale count` for this, because it fights the autoscaler.
 
-## 6. Deploy the autoscaler
+## 6. Launch checklist
+
+Finish this before section 7 and before any real traffic.
+
+1. Move Upstash to the fixed plan (section 1), then run `fly redis reset img-resize`, as the password was exposed in a transcript. The reset changes the password, so set the new `SVC_REDIS_PASSWORD` on `img-resize-web` and `img-resize-worker` again (section 3).
+2. Send a request with a forged `Fly-Client-IP` header and confirm the limiter keys on the real address.
+3. Send a real 12 MP baseline file, a progressive file at `SVC_MAX_IMG_PROGRESSIVE_PIXELS`, a CMYK file and a tall 1464x8192 file, and watch worker memory. The CMYK file must fail with `invalid image`.
+4. Record the p99 of `resize_job_duration_seconds`. Set `SVC_JOB_CLAIM_IDLE` to at least 2 x p99 and the worker `kill_timeout` to at least 5s + p99.
+5. Confirm one scrape in Grafana. Watch the first sync resize and the worker logs for go-redis problems against Upstash, including the `NOGROUP` text.
+
+## 7. Deploy the autoscaler
 
 ```bash
 fly deploy -c deploy/fly/autoscaler.toml --ha=false
@@ -107,7 +117,7 @@ fly deploy -c deploy/fly/autoscaler.toml --ha=false
 
 `--ha=false` is required. Two autoscalers would both start and stop machines.
 
-## 7. Checks and rollback
+## 8. Checks and rollback
 
 ```bash
 curl -i https://img-resize-web.fly.dev/health
