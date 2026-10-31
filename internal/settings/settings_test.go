@@ -80,3 +80,31 @@ func TestSettingsLoad(t *testing.T) {
 		t.Error("unexpected value for AUTH_REALM")
 	}
 }
+
+func TestSettingsJobReclaimInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want time.Duration
+	}{
+		{"default", "", 15 * time.Second},
+		{"override", "30s", 30 * time.Second},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.env != "" {
+				t.Setenv("SVC_JOB_RECLAIM_INTERVAL", test.env)
+			}
+
+			settings, err := settings.Load()
+			if err != nil {
+				t.Fatalf("unable to load settings: %v", err)
+			}
+
+			if settings.Service.JobReclaimInterval != test.want {
+				t.Errorf("unexpected reclaim interval: got %v want %v", settings.Service.JobReclaimInterval, test.want)
+			}
+		})
+	}
+}
