@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
 	"github.com/okulik/img-resize/internal/queue"
+	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/worker"
@@ -46,5 +48,7 @@ func run() error {
 		return worker.NewService(cfg, w).Start()
 	}
 
-	return service.NewService(cfg, cache, jobs).Start()
+	limiter := ratelimit.New(client, time.Now)
+
+	return service.NewService(cfg, cache, jobs, limiter).Start()
 }

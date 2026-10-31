@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/queue"
+	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/testredis"
@@ -79,5 +81,5 @@ func buildRouter(t *testing.T) *chi.Mux {
 	settings, _ := settings.Load()
 	cache, _ := cache.NewLRUImageCache(1)
 
-	return service.NewRouter(settings, cache, queue.New(client, settings))
+	return service.NewRouter(settings, cache, queue.New(client, settings), ratelimit.New(client, time.Now))
 }

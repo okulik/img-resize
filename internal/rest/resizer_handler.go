@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/pkg/errors"
@@ -12,6 +14,7 @@ import (
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/queue"
+	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/web"
 )
@@ -22,6 +25,8 @@ const (
 	retryAfterSeconds  = "5"
 	imageCacheControl  = "private, max-age=900"
 
+	requestsBucket = "requests"
+
 	statusSuccess  = "success"
 	statusFailure  = "failure"
 	statusEnqueued = "enqueued"
@@ -31,14 +36,16 @@ type ResizerHandler struct {
 	settings   *settings.Settings
 	imageCache cache.ImageCacheAdapter
 	queue      *queue.Queue
+	limiter    *ratelimit.Limiter
 }
 
 // Creates a new instance of ResizerHandler object.
-func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue) *ResizerHandler {
+func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter) *ResizerHandler {
 	return &ResizerHandler{
 		settings:   settings,
 		imageCache: imageCache,
 		queue:      queue,
+		limiter:    limiter,
 	}
 }
 
@@ -80,6 +87,10 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rh.allowRequest(w, r, len(resizeReq.URLs)) {
+		return
+	}
+
 	// Refuse the request while the queue is full. The depth is read once, so a
 	// batch may overshoot the limit by up to maxBatchImageCount jobs.
 	depth, err := rh.queue.Depth(r.Context())
@@ -109,6 +120,28 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.WriteJSONResponse(w, results, http.StatusOK)
+}
+
+// Counts the URLs of a request against the limit of the client's network and
+// answers 429 or 503 when the request must not go on. Clients are told apart by
+// prefix, as one IPv6 client usually controls many addresses.
+func (rh *ResizerHandler) allowRequest(w http.ResponseWriter, r *http.Request, urls int) bool {
+	cfg := rh.settings.Service
+	key := ratelimit.PrefixKey(ratelimit.ClientIP(r, cfg.TrustFlyClientIP), cfg.RateLimitIPv4Prefix, cfg.RateLimitIPv6Prefix)
+
+	allowed, retryAfter, err := rh.limiter.Allow(r.Context(), requestsBucket, key, int64(urls), cfg.RateLimitPerMinute)
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return false
+	}
+	if !allowed {
+		seconds := max(1, int(math.Ceil(retryAfter.Seconds())))
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		web.WriteErrorResponse(w, errors.New("too many requests"), http.StatusTooManyRequests)
+		return false
+	}
+
+	return true
 }
 
 // Resizes one image and answers with it, waiting up to SyncWaitTimeout for a

@@ -33,6 +33,10 @@ type ServiceSettings struct {
 	MaxQueueDepth           int64         `envconfig:"SVC_MAX_QUEUE_DEPTH" default:"10000"`
 	SyncWaitTimeout         time.Duration `envconfig:"SVC_SYNC_WAIT_TIMEOUT" default:"15s"`
 	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
+	RateLimitPerMinute      int64         `envconfig:"SVC_RATE_LIMIT_PER_MINUTE" default:"120"`
+	RateLimitIPv4Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV4_PREFIX" default:"32"`
+	RateLimitIPv6Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV6_PREFIX" default:"64"`
+	TrustFlyClientIP        bool          `envconfig:"SVC_TRUST_FLY_CLIENT_IP" default:"false"`
 }
 
 type HttpSettings struct {

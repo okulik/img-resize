@@ -14,6 +14,7 @@ import (
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/queue"
+	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/settings"
 )
 
@@ -21,13 +22,15 @@ type Service struct {
 	settings   *settings.Settings
 	imageCache cache.ImageCacheAdapter
 	queue      *queue.Queue
+	limiter    *ratelimit.Limiter
 }
 
-func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue) *Service {
+func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter) *Service {
 	return &Service{
 		settings:   settings,
 		imageCache: imageCache,
 		queue:      queue,
+		limiter:    limiter,
 	}
 }
 
@@ -65,7 +68,7 @@ func (svc *Service) startHttpServer() (*http.Server, context.CancelFunc) {
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", svc.settings.Http.ServerPort),
-		Handler:      NewRouter(svc.settings, svc.imageCache, svc.queue),
+		Handler:      NewRouter(svc.settings, svc.imageCache, svc.queue, svc.limiter),
 		BaseContext:  func(_ net.Listener) context.Context { return baseCtx },
 		IdleTimeout:  svc.settings.Http.ServerIdleTimeout,
 		ReadTimeout:  svc.settings.Http.ServerReadTimeout,

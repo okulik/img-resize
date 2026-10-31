@@ -20,6 +20,7 @@ import (
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
 	"github.com/okulik/img-resize/internal/queue"
+	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/testredis"
@@ -137,6 +138,9 @@ func buildServiceSettings(t *testing.T) *settings.Settings {
 			JobReclaimInterval:      time.Hour,
 			JobMaxAttempts:          3,
 			WorkerConcurrency:       1,
+			RateLimitPerMinute:      1000,
+			RateLimitIPv4Prefix:     32,
+			RateLimitIPv6Prefix:     64,
 			MaxQueueDepth:           100,
 		},
 		Auth: &settings.AuthSettings{Username: "admin", Password: "admin"},
@@ -167,7 +171,7 @@ func startService(t *testing.T, settings *settings.Settings) <-chan error {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- service.NewService(settings, imageCache, jobs).Start()
+		done <- service.NewService(settings, imageCache, jobs, ratelimit.New(client, time.Now)).Start()
 	}()
 
 	return done
