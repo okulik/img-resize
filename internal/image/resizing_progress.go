@@ -72,9 +72,8 @@ func (rp *ResizingProgress) DeleteResizing(imageID string) {
 // whichever happens first.
 func (rp *ResizingProgress) WaitForResizingDone(imageID string) bool {
 	rp.mu.RLock()
-	defer rp.mu.RUnlock()
-
 	ch, ok := rp.resizing[imageID]
+	rp.mu.RUnlock()
 	if !ok {
 		return true
 	}
