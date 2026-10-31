@@ -25,4 +25,4 @@ EXPOSE 4000
 
 USER app:app
 
-ENTRYPOINT ["/resizer"]
+ENTRYPOINT ["/img-resize"]
