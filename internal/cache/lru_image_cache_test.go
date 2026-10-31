@@ -16,8 +16,8 @@ func TestLRUImageCacheGet(t *testing.T) {
 	}
 	cache.Add(context.Background(), "foo", []byte("bar"))
 
-	val, ok := cache.Get(context.Background(), "foo")
-	if !ok || string(val) != "bar" {
+	val, ok, err := cache.Get(context.Background(), "foo")
+	if err != nil || !ok || string(val) != "bar" {
 		t.Error("get method returning unexpected value")
 	}
 }
@@ -31,17 +31,17 @@ func TestLRUImageCacheAdd(t *testing.T) {
 	cache.Add(context.Background(), "bar", []byte("2"))
 	cache.Add(context.Background(), "baz", []byte("3"))
 
-	_, ok := cache.Get(context.Background(), "foo")
+	_, ok, _ := cache.Get(context.Background(), "foo")
 	if ok {
 		t.Error("add method not replacing older items")
 	}
 
-	val, ok := cache.Get(context.Background(), "bar")
+	val, ok, _ := cache.Get(context.Background(), "bar")
 	if !ok || string(val) != "2" {
 		t.Error("method returning unexpected value")
 	}
 
-	val, ok = cache.Get(context.Background(), "baz")
+	val, ok, _ = cache.Get(context.Background(), "baz")
 	if !ok || string(val) != "3" {
 		t.Error("method returning unexpected value")
 	}
@@ -69,7 +69,7 @@ func TestLRUImageCacheContains(t *testing.T) {
 	}
 	cache.Add(context.Background(), "foo", []byte("bar"))
 
-	if !cache.Contains(context.Background(), "foo") {
+	if ok, err := cache.Contains(context.Background(), "foo"); err != nil || !ok {
 		t.Error("get method returning unexpected value")
 	}
 }

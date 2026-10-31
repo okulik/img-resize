@@ -181,6 +181,27 @@ func TestWorkerRetriesWhenCacheWriteFails(t *testing.T) {
 	}
 }
 
+func TestWorkerRetriesWhenCacheCheckFails(t *testing.T) {
+	f := newFixture(t, shortIdle)
+	failing := &failsFirstContains{ImageCacheAdapter: f.cache}
+	src := imageSource(t)
+	job := f.submit(t, src.URL)
+
+	// Only the worker gets the failing cache, so the test's own checks aren't counted.
+	f.cache = failing
+	f.start(t)
+	f.cache = failing.ImageCacheAdapter
+
+	f.waitFinished(t, job)
+	f.requireResized(t, job)
+	if n := failing.checks.Load(); n != 2 {
+		t.Errorf("unexpected cache checks: %d", n)
+	}
+	if n := src.requests.Load(); n != 1 {
+		t.Errorf("unexpected source requests: %d", n)
+	}
+}
+
 func TestWorkerFinishesCurrentJobOnShutdown(t *testing.T) {
 	f := newFixture(t, noRetry)
 	src, gate := gatedSource(t)
@@ -382,7 +403,7 @@ func TestWorkerRunsReclaimedJobsWhenReclaimReportsError(t *testing.T) {
 
 	f.waitFinished(t, second)
 	f.requireResized(t, second)
-	if f.cache.Contains(context.Background(), first.ID) {
+	if ok, _ := f.cache.Contains(context.Background(), first.ID); ok {
 		t.Error("first job ran, so the test no longer covers a partial reclaim")
 	}
 }
@@ -690,7 +711,8 @@ func (f *fixture) waitForImage(t *testing.T, job model.Job) {
 	t.Helper()
 
 	eventually(t, "the image of job "+job.ID, func() bool {
-		return f.cache.Contains(context.Background(), job.ID)
+		ok, err := f.cache.Contains(context.Background(), job.ID)
+		return err == nil && ok
 	})
 }
 
@@ -746,8 +768,8 @@ func (f *fixture) waitFailed(t *testing.T, job model.Job) queue.State {
 func (f *fixture) requireResized(t *testing.T, job model.Job) {
 	t.Helper()
 
-	data, ok := f.cache.Get(context.Background(), job.ID)
-	if !ok {
+	data, ok, err := f.cache.Get(context.Background(), job.ID)
+	if err != nil || !ok {
 		t.Fatalf("job %s is not cached", job.ID)
 	}
 	img, err := jpeg.Decode(bytes.NewReader(data))
@@ -928,6 +950,20 @@ func (c *rejectsFirstAdd) Add(ctx context.Context, key string, value any) bool {
 	}
 
 	return c.ImageCacheAdapter.Add(ctx, key, value)
+}
+
+// failsFirstContains fails one cache check, then behaves.
+type failsFirstContains struct {
+	cache.ImageCacheAdapter
+	checks atomic.Int64
+}
+
+func (c *failsFirstContains) Contains(ctx context.Context, key string) (bool, error) {
+	if c.checks.Add(1) == 1 {
+		return false, errors.New("redis down")
+	}
+
+	return c.ImageCacheAdapter.Contains(ctx, key)
 }
 
 // hook observes and fails commands of a Redis client.

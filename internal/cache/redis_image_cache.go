@@ -31,26 +31,25 @@ func NewRedisImageCache(client *redis.Client, settings *settings.Settings) (Imag
 	}, nil
 }
 
-func (cache *RedisImageCache) Get(ctx context.Context, key string) ([]byte, bool) {
+func (cache *RedisImageCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	data, err := cache.Client.Get(ctx, keyPrefix+key).Bytes()
 	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			log.Printf("error reading from cache: %v", err)
+		if errors.Is(err, redis.Nil) {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, fmt.Errorf("reading image %s from cache: %w", key, err)
 	}
 
-	return data, true
+	return data, true, nil
 }
 
-func (cache *RedisImageCache) Contains(ctx context.Context, key string) bool {
+func (cache *RedisImageCache) Contains(ctx context.Context, key string) (bool, error) {
 	n, err := cache.Client.Exists(ctx, keyPrefix+key).Result()
 	if err != nil {
-		log.Printf("error reading from cache: %v", err)
-		return false
+		return false, fmt.Errorf("checking image %s in cache: %w", key, err)
 	}
 
-	return n > 0
+	return n > 0, nil
 }
 
 func (cache *RedisImageCache) Add(ctx context.Context, key string, value any) bool {

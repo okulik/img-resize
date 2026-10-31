@@ -162,7 +162,12 @@ func (w *Worker) reclaimOne(ctx context.Context) bool {
 func (w *Worker) handle(ctx context.Context, d queue.Delivery) {
 	job := d.Job
 
-	if w.cache.Contains(ctx, job.ID) {
+	cached, err := w.cache.Contains(ctx, job.ID)
+	if err != nil {
+		log.Printf("job %s: attempt %d could not check the cache: %v", job.ID, d.Attempts, err)
+		return
+	}
+	if cached {
 		w.complete(ctx, d)
 		return
 	}

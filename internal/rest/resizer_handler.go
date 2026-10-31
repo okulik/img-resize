@@ -20,6 +20,7 @@ const (
 	maxRequestSize     = 8 * 1024
 	maxBatchImageCount = 100
 	retryAfterSeconds  = "5"
+	imageCacheControl  = "private, max-age=900"
 
 	statusSuccess  = "success"
 	statusFailure  = "failure"
@@ -102,7 +103,11 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 // image is cached or its job already exists.
 func (rh *ResizerHandler) submit(ctx context.Context, url string, width uint, height uint) (model.ResizeResponse, error) {
 	id := model.ImageID(url, width, height)
-	if rh.imageCache.Contains(ctx, id) {
+	cached, err := rh.imageCache.Contains(ctx, id)
+	if err != nil {
+		return model.ResizeResponse{}, err
+	}
+	if cached {
 		return model.ResizeResponse{Result: statusSuccess, ID: id, Cached: true}, nil
 	}
 
@@ -127,24 +132,48 @@ func (rh *ResizerHandler) writeUnavailable(w http.ResponseWriter, err error) {
 	web.WriteErrorResponse(w, errors.New("service unavailable"), http.StatusServiceUnavailable)
 }
 
-// A web handler for retrieving resized images from the image cache.
+// A web handler for retrieving resized images from the image cache. While there
+// is no image it reports the state of the job that makes it: 202 while the job
+// is queued or running, 422 once it failed, and 404 if there is no such job. A
+// Redis failure is 503, as it says nothing about the image.
 func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	imageID := chi.URLParam(r, "imageID")
 
-	data, ok := rh.imageCache.Get(r.Context(), imageID)
+	data, ok, err := rh.imageCache.Get(ctx, imageID)
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return
+	}
 	if ok {
 		writeImageResponse(w, data)
 		return
 	}
 
-	web.WriteErrorResponse(w, errors.New("image not cached"), http.StatusNotFound)
+	state, found, err := rh.queue.State(ctx, imageID)
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return
+	}
+	if !found {
+		web.WriteErrorResponse(w, errors.New("image not cached"), http.StatusNotFound)
+		return
+	}
+
+	if state.Status == queue.StatusFailed {
+		web.WriteJSONResponse(w, model.ResizeResponse{Result: statusFailure, ID: imageID, Error: state.Error}, http.StatusUnprocessableEntity)
+		return
+	}
+
+	web.WriteJSONResponse(w, model.ResizeResponse{Result: statusEnqueued, ID: imageID}, http.StatusAccepted)
 }
 
 func writeImageResponse(w http.ResponseWriter, data []byte) {
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", imageCacheControl)
 	w.WriteHeader(http.StatusOK)
-	w.Header().Add("content-type", "image/jpeg")
-	_, err := w.Write(data)
-	if err != nil {
-		web.WriteErrorResponse(w, errors.New("unable to write a response"), http.StatusInternalServerError)
+	if _, err := w.Write(data); err != nil {
+		// The status is sent, so all that is left is to log.
+		log.Printf("writing image response: %v", err)
 	}
 }

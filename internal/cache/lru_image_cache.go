@@ -23,17 +23,17 @@ func NewLRUImageCacheWithCacheImpl(cache *lru.Cache) (ImageCacheAdapter, error) 
 	return &LRUImageCache{cache}, nil
 }
 
-func (cache *LRUImageCache) Get(_ context.Context, key string) ([]byte, bool) {
+func (cache *LRUImageCache) Get(_ context.Context, key string) ([]byte, bool, error) {
 	val, ok := cache.Cache.Get(key)
 	if val != nil {
-		return val.([]byte), ok
+		return val.([]byte), ok, nil
 	}
 
-	return nil, false
+	return nil, false, nil
 }
 
-func (cache *LRUImageCache) Contains(_ context.Context, key string) bool {
-	return cache.Cache.Contains(key)
+func (cache *LRUImageCache) Contains(_ context.Context, key string) (bool, error) {
+	return cache.Cache.Contains(key), nil
 }
 
 func (cache *LRUImageCache) Add(_ context.Context, key string, value any) bool {

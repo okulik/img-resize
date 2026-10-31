@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,8 +20,8 @@ func TestRedisImageCacheGet(t *testing.T) {
 		t.Error("error allocating RedisImageCache")
 	}
 
-	val, ok := cache.Get(context.Background(), "foo")
-	if !ok || string(val) != "bar" {
+	val, ok, err := cache.Get(context.Background(), "foo")
+	if err != nil || !ok || string(val) != "bar" {
 		t.Error("get method returning unexpected value")
 	}
 }
@@ -37,13 +38,13 @@ func TestRedisImageCacheAdd(t *testing.T) {
 	}
 
 	cache.Add(context.Background(), "foo", "bar")
-	val, ok := cache.Get(context.Background(), "foo")
-	if !ok || string(val) != "bar" {
+	val, ok, err := cache.Get(context.Background(), "foo")
+	if err != nil || !ok || string(val) != "bar" {
 		t.Error("get method returning unexpected value")
 	}
 
-	_, ok = cache.Get(context.Background(), "baz")
-	if ok {
+	_, ok, err = cache.Get(context.Background(), "baz")
+	if err != nil || ok {
 		t.Error("method expected to return nil for nonexistent key")
 	}
 }
@@ -59,8 +60,8 @@ func TestRedisImageCacheAddWithTTL(t *testing.T) {
 	}
 
 	cache.Add(context.Background(), "foo", "bar")
-	val, ok := cache.Get(context.Background(), "foo")
-	if !ok || string(val) != "bar" {
+	val, ok, err := cache.Get(context.Background(), "foo")
+	if err != nil || !ok || string(val) != "bar" {
 		t.Error("get method returning unexpected value")
 	}
 }
@@ -74,7 +75,7 @@ func TestRedisImageCacheContainsUsesExists(t *testing.T) {
 		t.Error("error allocating RedisImageCache")
 	}
 
-	if !cache.Contains(context.Background(), "foo") {
+	if ok, err := cache.Contains(context.Background(), "foo"); err != nil || !ok {
 		t.Error("contains method returning unexpected value")
 	}
 }
@@ -88,7 +89,7 @@ func TestRedisImageCacheContainsMissing(t *testing.T) {
 		t.Error("error allocating RedisImageCache")
 	}
 
-	if cache.Contains(context.Background(), "foo") {
+	if ok, err := cache.Contains(context.Background(), "foo"); err != nil || ok {
 		t.Error("contains method returning true for missing key")
 	}
 }
@@ -114,5 +115,35 @@ func buildSettings(ttl time.Duration) *settings.Settings {
 		},
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{},
+	}
+}
+
+func TestRedisImageCacheGetReportsRedisError(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	mock.ExpectGet("resize:image:foo").SetErr(errors.New("connection refused"))
+
+	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
+	if err != nil {
+		t.Error("error allocating RedisImageCache")
+	}
+
+	val, ok, err := cache.Get(context.Background(), "foo")
+	if err == nil || ok || val != nil {
+		t.Errorf("get method hiding a redis error: %q %v %v", val, ok, err)
+	}
+}
+
+func TestRedisImageCacheContainsReportsRedisError(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	mock.ExpectExists("resize:image:foo").SetErr(errors.New("connection refused"))
+
+	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
+	if err != nil {
+		t.Error("error allocating RedisImageCache")
+	}
+
+	ok, err := cache.Contains(context.Background(), "foo")
+	if err == nil || ok {
+		t.Errorf("contains method hiding a redis error: %v %v", ok, err)
 	}
 }

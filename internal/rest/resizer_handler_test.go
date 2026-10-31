@@ -3,6 +3,7 @@ package rest_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -166,7 +167,7 @@ func TestResizeAcceptsAsyncParameter(t *testing.T) {
 	}
 }
 
-func TestGetImageServesCachedImage(t *testing.T) {
+func TestGetImageReturnsImage(t *testing.T) {
 	f := newFixture(t)
 	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
 
@@ -175,15 +176,95 @@ func TestGetImageServesCachedImage(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Body.String() != "jpeg" {
 		t.Errorf("unexpected response: %d %q", rec.Code, rec.Body.String())
 	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Errorf("unexpected Content-Type: %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=900" {
+		t.Errorf("unexpected Cache-Control: %q", got)
+	}
 }
 
-func TestGetImageReturnsNotFoundForUncachedImage(t *testing.T) {
+func TestGetImageWhileQueued(t *testing.T) {
+	f := newFixture(t)
+	f.submit(t, "abc")
+
+	rec := f.get("/v1/image/abc")
+
+	f.requirePending(t, rec, "abc")
+}
+
+func TestGetImageWhileProcessing(t *testing.T) {
+	f := newFixture(t)
+	f.submit(t, "abc")
+	if err := f.queue.MarkProcessing(context.Background(), "abc"); err != nil {
+		t.Fatalf("marking processing: %v", err)
+	}
+
+	rec := f.get("/v1/image/abc")
+
+	f.requirePending(t, rec, "abc")
+}
+
+func TestGetImageFailed(t *testing.T) {
+	f := newFixture(t)
+	if err := f.client.HSet(context.Background(), "resize:job:abc", "status", "failed", "error", "invalid image").Err(); err != nil {
+		t.Fatalf("seeding failed state: %v", err)
+	}
+
+	rec := f.get("/v1/image/abc")
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"result":"failure","id":"abc","error":"invalid image","cached":false}` {
+		t.Errorf("unexpected body: %s", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Errorf("unexpected Cache-Control: %q", got)
+	}
+}
+
+func TestGetImageUnknown(t *testing.T) {
 	f := newFixture(t)
 
 	rec := f.get("/v1/image/missing")
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unexpected status code: %v", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Errorf("unexpected Cache-Control: %q", got)
+	}
+}
+
+func TestGetImageRedisDown(t *testing.T) {
+	f := newFixture(t)
+	if err := f.client.Close(); err != nil {
+		t.Fatalf("closing client: %v", err)
+	}
+
+	rec := f.get("/v1/image/abc")
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"service unavailable"}` {
+		t.Errorf("unexpected body: %s", got)
+	}
+}
+
+func TestResizeRedisDown(t *testing.T) {
+	f := newFixture(t)
+	// Depth is read first, so only a failing cache check can fail the request.
+	f.handler = rest.NewResizerHandler(f.settings, failingCache{f.cache}, f.queue)
+
+	rec := f.resize(t, "/v1/resize", `{"urls":["https://example.com/a.jpg"],"width":200}`)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"service unavailable"}` {
+		t.Errorf("unexpected body: %s", got)
 	}
 }
 
@@ -214,10 +295,11 @@ func TestResizeImageDimensionLimit(t *testing.T) {
 }
 
 type fixture struct {
-	client  *redis.Client
-	cache   cache.ImageCacheAdapter
-	queue   *queue.Queue
-	handler *rest.ResizerHandler
+	settings *settings.Settings
+	client   *redis.Client
+	cache    cache.ImageCacheAdapter
+	queue    *queue.Queue
+	handler  *rest.ResizerHandler
 }
 
 func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixture {
@@ -243,7 +325,7 @@ func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixtur
 	}
 	q := queue.New(client, s)
 
-	return &fixture{client: client, cache: imageCache, queue: q, handler: rest.NewResizerHandler(s, imageCache, q)}
+	return &fixture{settings: s, client: client, cache: imageCache, queue: q, handler: rest.NewResizerHandler(s, imageCache, q)}
 }
 
 func (f *fixture) resize(t *testing.T, path string, body string) *httptest.ResponseRecorder {
@@ -292,4 +374,36 @@ func decodeResults(t *testing.T, rec *httptest.ResponseRecorder) []model.ResizeR
 	}
 
 	return results
+}
+
+// submit enqueues a job with the given ID.
+func (f *fixture) submit(t *testing.T, id string) {
+	t.Helper()
+
+	if _, err := f.queue.Submit(context.Background(), model.Job{ID: id, URL: "https://example.com/a.jpg", Width: 200}); err != nil {
+		t.Fatalf("submitting job: %v", err)
+	}
+}
+
+func (f *fixture) requirePending(t *testing.T, rec *httptest.ResponseRecorder, id string) {
+	t.Helper()
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"result":"enqueued","id":"`+id+`","cached":false}` {
+		t.Errorf("unexpected body: %s", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Errorf("unexpected Cache-Control: %q", got)
+	}
+}
+
+// failingCache reports an error from every check, as a broken Redis would.
+type failingCache struct {
+	cache.ImageCacheAdapter
+}
+
+func (failingCache) Contains(context.Context, string) (bool, error) {
+	return false, errors.New("redis down")
 }
