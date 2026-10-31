@@ -41,6 +41,7 @@ type ResizeJob struct {
 type Resizer struct {
 	settings         *settings.Settings
 	imageCache       cache.ImageCacheAdapter
+	httpClient       *http.Client
 	resizeJobs       chan *ResizeJob
 	resizingProgress *ResizingProgress
 	wg               sync.WaitGroup
@@ -51,6 +52,7 @@ func NewResizer(settings *settings.Settings, imageCache cache.ImageCacheAdapter)
 	return &Resizer{
 		settings:         settings,
 		imageCache:       imageCache,
+		httpClient:       &http.Client{Timeout: settings.Http.ClientReadTimeout},
 		resizeJobs:       make(chan *ResizeJob, maxResizeJobsSize),
 		resizingProgress: NewResizingProgress(settings),
 	}
@@ -179,7 +181,7 @@ func (r *Resizer) fetch(ctx context.Context, url string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", r.settings.Http.ClientUserAgent)
 	log.Print("fetching ", url)
-	res, err := new(http.Client).Do(req)
+	res, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("image fetch failed: %v", err)
 	}

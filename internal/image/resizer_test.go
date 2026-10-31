@@ -181,6 +181,34 @@ func TestProcessRejectsImageWithZeroHeight(t *testing.T) {
 	}
 }
 
+func TestProcessFailsWhenSourceStopsResponding(t *testing.T) {
+	release := make(chan struct{})
+	source := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		<-release
+	}))
+	t.Cleanup(source.Close)
+	defer close(release)
+
+	settings := buildSettings()
+	settings.Http.ClientReadTimeout = 50 * time.Millisecond
+	resizer := image.NewResizer(settings, buildCache(t))
+
+	done := make(chan []model.ResizeResponse, 1)
+	go func() {
+		results, _ := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
+		done <- results
+	}()
+
+	select {
+	case results := <-done:
+		if len(results) != 1 || results[0].Result != "failure" {
+			t.Errorf("unexpected results: %+v", results)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch did not time out")
+	}
+}
+
 type rejectingCache struct{}
 
 func (rejectingCache) Get(context.Context, string) ([]byte, bool) { return nil, false }
