@@ -105,8 +105,15 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 		return nil, permanent(ReasonInvalid, errors.New("jpeg color model is neither YCbCr nor grayscale"))
 	}
 
-	if int64(config.Width)*int64(config.Height) > r.settings.Service.MaxImagePixels {
+	pixels := int64(config.Width) * int64(config.Height)
+	if pixels > r.settings.Service.MaxImagePixels {
 		return nil, permanent(ReasonTooLarge, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height))
+	}
+
+	// the decoder keeps every coefficient of a progressive image in memory, at
+	// 4 bytes each, on top of the pixels
+	if pixels > r.settings.Service.MaxImageProgressivePixels && isProgressiveJPEG(data) {
+		return nil, permanent(ReasonTooLarge, fmt.Errorf("progressive image size %dx%d exceeds the pixel limit", config.Width, config.Height))
 	}
 
 	if config.Width == 0 || config.Height == 0 {

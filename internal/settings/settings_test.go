@@ -109,6 +109,34 @@ func TestSettingsJobReclaimInterval(t *testing.T) {
 	}
 }
 
+func TestSettingsMaxImageProgressivePixels(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want int64
+	}{
+		{"default", "", 50000000},
+		{"override", "6000000", 6000000},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.env != "" {
+				t.Setenv("SVC_MAX_IMG_PROGRESSIVE_PIXELS", test.env)
+			}
+
+			settings, err := settings.Load()
+			if err != nil {
+				t.Fatalf("unable to load settings: %v", err)
+			}
+
+			if settings.Service.MaxImageProgressivePixels != test.want {
+				t.Errorf("unexpected progressive pixel limit: got %d want %d", settings.Service.MaxImageProgressivePixels, test.want)
+			}
+		})
+	}
+}
+
 func TestSettingsLoadRole(t *testing.T) {
 	tests := []struct {
 		name string

@@ -14,31 +14,32 @@ const (
 )
 
 type ServiceSettings struct {
-	Role                    string        `envconfig:"SVC_ROLE" default:"web"`
-	ImageCacheSize          int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
-	ImageCacheTTL           time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
-	MaxImageSize            int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
-	MaxImageDimension       uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
-	MaxImagePixels          int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
-	MaxImageSourceDimension uint          `envconfig:"SVC_MAX_IMG_SOURCE_DIMENSION" default:"8192"`
-	RedisHost               string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
-	RedisPort               int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
-	RedisPassword           string        `envconfig:"SVC_REDIS_PASSWORD"`
-	JobStateTTL             time.Duration `envconfig:"SVC_JOB_STATE_TTL" default:"1h"`
-	FailedJobTTL            time.Duration `envconfig:"SVC_FAILED_JOB_TTL" default:"5m"`
-	JobClaimIdle            time.Duration `envconfig:"SVC_JOB_CLAIM_IDLE" default:"60s"`
-	JobReclaimInterval      time.Duration `envconfig:"SVC_JOB_RECLAIM_INTERVAL" default:"15s"`
-	WorkerConcurrency       int           `envconfig:"SVC_WORKER_CONCURRENCY" default:"1"`
-	JobMaxAttempts          int64         `envconfig:"SVC_JOB_MAX_ATTEMPTS" default:"3"`
-	MaxQueueDepth           int64         `envconfig:"SVC_MAX_QUEUE_DEPTH" default:"10000"`
-	SyncWaitTimeout         time.Duration `envconfig:"SVC_SYNC_WAIT_TIMEOUT" default:"15s"`
-	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
-	RateLimitPerMinute      int64         `envconfig:"SVC_RATE_LIMIT_PER_MINUTE" default:"120"`
-	RateLimitBytesPerMinute int64         `envconfig:"SVC_RATE_LIMIT_BYTES_PER_MINUTE" default:"104857600"`
-	RateLimitIPv4Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV4_PREFIX" default:"32"`
-	RateLimitIPv6Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV6_PREFIX" default:"64"`
-	TrustFlyClientIP        bool          `envconfig:"SVC_TRUST_FLY_CLIENT_IP" default:"false"`
-	MetricsPort             uint          `envconfig:"SVC_METRICS_PORT" default:"9091"`
+	Role                      string        `envconfig:"SVC_ROLE" default:"web"`
+	ImageCacheSize            int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
+	ImageCacheTTL             time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
+	MaxImageSize              int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
+	MaxImageDimension         uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
+	MaxImagePixels            int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
+	MaxImageProgressivePixels int64         `envconfig:"SVC_MAX_IMG_PROGRESSIVE_PIXELS" default:"50000000"`
+	MaxImageSourceDimension   uint          `envconfig:"SVC_MAX_IMG_SOURCE_DIMENSION" default:"8192"`
+	RedisHost                 string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
+	RedisPort                 int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
+	RedisPassword             string        `envconfig:"SVC_REDIS_PASSWORD"`
+	JobStateTTL               time.Duration `envconfig:"SVC_JOB_STATE_TTL" default:"1h"`
+	FailedJobTTL              time.Duration `envconfig:"SVC_FAILED_JOB_TTL" default:"5m"`
+	JobClaimIdle              time.Duration `envconfig:"SVC_JOB_CLAIM_IDLE" default:"60s"`
+	JobReclaimInterval        time.Duration `envconfig:"SVC_JOB_RECLAIM_INTERVAL" default:"15s"`
+	WorkerConcurrency         int           `envconfig:"SVC_WORKER_CONCURRENCY" default:"1"`
+	JobMaxAttempts            int64         `envconfig:"SVC_JOB_MAX_ATTEMPTS" default:"3"`
+	MaxQueueDepth             int64         `envconfig:"SVC_MAX_QUEUE_DEPTH" default:"10000"`
+	SyncWaitTimeout           time.Duration `envconfig:"SVC_SYNC_WAIT_TIMEOUT" default:"15s"`
+	AllowInternalURLs         bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
+	RateLimitPerMinute        int64         `envconfig:"SVC_RATE_LIMIT_PER_MINUTE" default:"120"`
+	RateLimitBytesPerMinute   int64         `envconfig:"SVC_RATE_LIMIT_BYTES_PER_MINUTE" default:"104857600"`
+	RateLimitIPv4Prefix       int           `envconfig:"SVC_RATE_LIMIT_IPV4_PREFIX" default:"32"`
+	RateLimitIPv6Prefix       int           `envconfig:"SVC_RATE_LIMIT_IPV6_PREFIX" default:"64"`
+	TrustFlyClientIP          bool          `envconfig:"SVC_TRUST_FLY_CLIENT_IP" default:"false"`
+	MetricsPort               uint          `envconfig:"SVC_METRICS_PORT" default:"9091"`
 }
 
 type HttpSettings struct {

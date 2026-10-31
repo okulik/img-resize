@@ -42,6 +42,54 @@ func TestResizeSourcePixelLimit(t *testing.T) {
 	}
 }
 
+func TestResizeProgressivePixelLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxPixels int64
+		wantErr   bool
+	}{
+		{"at limit", 4096, false},
+		{"above limit", 4095, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, readFixture(t, "testdata/progressive.jpg"))
+			settings := buildSettings()
+			settings.Service.MaxImageProgressivePixels = test.maxPixels
+
+			_, err := image.NewResizer(settings).Resize(context.Background(), source.URL, 32, 0)
+
+			if (err != nil) != test.wantErr {
+				t.Errorf("unexpected error: got %v want error %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestResizeProgressivePixelLimitSkipsBaselineImages(t *testing.T) {
+	comment := []byte{0xff, 0xfe, 0x00, 0x04, 0xff, 0xc2}
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"plain", buildJPEG(t, 64, 64)},
+		{"progressive marker in a comment", slices.Insert(buildJPEG(t, 64, 64), 2, comment...)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, test.data)
+			settings := buildSettings()
+			settings.Service.MaxImageProgressivePixels = 1
+
+			if _, err := image.NewResizer(settings).Resize(context.Background(), source.URL, 32, 0); err != nil {
+				t.Errorf("unexpected error %v", err)
+			}
+		})
+	}
+}
+
 func TestResizeSourceDimensionLimit(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -257,6 +305,12 @@ func TestResizeClassifiesFailures(t *testing.T) {
 			reason:    image.ReasonTooLarge, permanent: true,
 		},
 		{
+			name:      "progressive over its pixel limit",
+			source:    imageServer(func(t *testing.T) []byte { return readFixture(t, "testdata/progressive.jpg") }),
+			configure: func(s *settings.Settings) { s.Service.MaxImageProgressivePixels = 4095 },
+			reason:    image.ReasonTooLarge, permanent: true,
+		},
+		{
 			name:      "over the source side limit",
 			source:    imageServer(jpegOf(64, 64)),
 			configure: func(s *settings.Settings) { s.Service.MaxImageSourceDimension = 63 },
@@ -328,11 +382,12 @@ func TestResizeReturnsResizedImage(t *testing.T) {
 func buildSettings() *settings.Settings {
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{
-			MaxImageSize:            1024 * 1024,
-			MaxImagePixels:          1024 * 1024,
-			MaxImageDimension:       1024,
-			MaxImageSourceDimension: 1024,
-			AllowInternalURLs:       true,
+			MaxImageSize:              1024 * 1024,
+			MaxImagePixels:            1024 * 1024,
+			MaxImageProgressivePixels: 1024 * 1024,
+			MaxImageDimension:         1024,
+			MaxImageSourceDimension:   1024,
+			AllowInternalURLs:         true,
 		},
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{ClientReadTimeout: time.Second},
