@@ -110,10 +110,11 @@ func buildServiceSettings(t *testing.T) *settings.Settings {
 
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{
-			MaxImageSize:      1024 * 1024,
-			MaxImagePixels:    1024 * 1024,
-			MaxImageDimension: 1024,
-			AllowInternalURLs: true,
+			MaxImageSize:            1024 * 1024,
+			MaxImagePixels:          1024 * 1024,
+			MaxImageDimension:       1024,
+			MaxImageSourceDimension: 1024,
+			AllowInternalURLs:       true,
 		},
 		Auth: &settings.AuthSettings{Username: "admin", Password: "admin"},
 		Http: &settings.HttpSettings{

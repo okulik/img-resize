@@ -9,17 +9,18 @@ import (
 )
 
 type ServiceSettings struct {
-	ImageCacheSize     int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
-	ImageCacheTTL      time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
-	AsyncResize        bool          `envconfig:"SVC_ASYNC_RESIZE" default:"true"`
-	ImageResizeTimeout time.Duration `envconfig:"SVC_IMG_RESIZE_TIMEOUT" default:"5s"`
-	MaxImageSize       int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
-	MaxImageDimension  uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
-	MaxImagePixels     int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
-	RedisHost          string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
-	RedisPort          int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
-	RedisPassword      string        `envconfig:"SVC_REDIS_PASSWORD"`
-	AllowInternalURLs  bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
+	ImageCacheSize          int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
+	ImageCacheTTL           time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
+	AsyncResize             bool          `envconfig:"SVC_ASYNC_RESIZE" default:"true"`
+	ImageResizeTimeout      time.Duration `envconfig:"SVC_IMG_RESIZE_TIMEOUT" default:"5s"`
+	MaxImageSize            int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
+	MaxImageDimension       uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
+	MaxImagePixels          int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
+	MaxImageSourceDimension uint          `envconfig:"SVC_MAX_IMG_SOURCE_DIMENSION" default:"8192"`
+	RedisHost               string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
+	RedisPort               int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
+	RedisPassword           string        `envconfig:"SVC_REDIS_PASSWORD"`
+	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
 }
 
 type HttpSettings struct {

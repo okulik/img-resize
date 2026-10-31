@@ -124,6 +124,38 @@ func TestProcessSourcePixelLimit(t *testing.T) {
 	}
 }
 
+func TestProcessSourceDimensionLimit(t *testing.T) {
+	tests := []struct {
+		name         string
+		sourceWidth  int
+		sourceHeight int
+		want         string
+	}{
+		{"wide at limit", 100, 10, "success"},
+		{"tall at limit", 10, 100, "success"},
+		{"wide above limit", 101, 10, "failure"},
+		{"tall above limit", 10, 101, "failure"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, buildJPEG(t, test.sourceWidth, test.sourceHeight))
+			settings := buildSettings()
+			settings.Service.MaxImageSourceDimension = 100
+			resizer := image.NewResizer(settings, buildCache(t))
+
+			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+
+			if len(results) != 1 || results[0].Result != test.want {
+				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			}
+		})
+	}
+}
+
 func TestProcessOutputDimensionLimit(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -218,12 +250,13 @@ func (rejectingCache) Add(context.Context, string, any) bool      { return false
 func buildSettings() *settings.Settings {
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{
-			AsyncResize:        true,
-			ImageResizeTimeout: time.Second,
-			MaxImageSize:       1024 * 1024,
-			MaxImagePixels:     1024 * 1024,
-			MaxImageDimension:  1024,
-			AllowInternalURLs:  true,
+			AsyncResize:             true,
+			ImageResizeTimeout:      time.Second,
+			MaxImageSize:            1024 * 1024,
+			MaxImagePixels:          1024 * 1024,
+			MaxImageDimension:       1024,
+			MaxImageSourceDimension: 1024,
+			AllowInternalURLs:       true,
 		},
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{ClientReadTimeout: time.Second},

@@ -215,6 +215,11 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 		return nil, fmt.Errorf("image size %dx%d is empty", config.Width, config.Height)
 	}
 
+	maxSourceDimension := int(r.settings.Service.MaxImageSourceDimension)
+	if config.Width > maxSourceDimension || config.Height > maxSourceDimension {
+		return nil, fmt.Errorf("image size %dx%d exceeds the source dimension limit", config.Width, config.Height)
+	}
+
 	maxDimension := r.settings.Service.MaxImageDimension
 	outWidth, outHeight := outputSize(uint(config.Width), uint(config.Height), width, height)
 	if outWidth > maxDimension || outHeight > maxDimension {
