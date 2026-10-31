@@ -209,6 +209,16 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 		return nil, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height)
 	}
 
+	if config.Width == 0 || config.Height == 0 {
+		return nil, fmt.Errorf("image size %dx%d is empty", config.Width, config.Height)
+	}
+
+	maxDimension := r.settings.Service.MaxImageDimension
+	outWidth, outHeight := outputSize(uint(config.Width), uint(config.Height), width, height)
+	if outWidth > maxDimension || outHeight > maxDimension {
+		return nil, fmt.Errorf("resized image size %dx%d exceeds the dimension limit", outWidth, outHeight)
+	}
+
 	// decode jpeg into image.Image
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -225,6 +235,21 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 	}
 
 	return newData.Bytes(), nil
+}
+
+// Calculates the size of a resized image. If either width or height is 0, it is
+// derived from the source image, respecting the aspect ratio.
+func outputSize(sourceWidth uint, sourceHeight uint, width uint, height uint) (uint, uint) {
+	switch {
+	case width == 0 && height == 0:
+		return sourceWidth, sourceHeight
+	case width == 0:
+		return sourceWidth * height / sourceHeight, height
+	case height == 0:
+		return width, sourceHeight * width / sourceWidth
+	}
+
+	return width, height
 }
 
 func (r *Resizer) trySendResizeJob(url string, width uint, height uint) bool {

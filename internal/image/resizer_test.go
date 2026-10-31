@@ -124,6 +124,63 @@ func TestProcessSourcePixelLimit(t *testing.T) {
 	}
 }
 
+func TestProcessOutputDimensionLimit(t *testing.T) {
+	tests := []struct {
+		name          string
+		sourceWidth   int
+		sourceHeight  int
+		width, height uint
+		want          string
+	}{
+		{"derived height at limit", 10, 1000, 1, 0, "success"},
+		{"derived height above limit", 10, 1000, 2, 0, "failure"},
+		{"derived width at limit", 1000, 10, 0, 1, "success"},
+		{"derived width above limit", 1000, 10, 0, 2, "failure"},
+		{"explicit size ignores aspect ratio", 10, 1000, 50, 50, "success"},
+		{"unscaled source at limit", 100, 100, 0, 0, "success"},
+		{"unscaled source above limit", 101, 100, 0, 0, "failure"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, buildJPEG(t, test.sourceWidth, test.sourceHeight))
+			settings := buildSettings()
+			settings.Service.MaxImageDimension = 100
+			resizer := image.NewResizer(settings, buildCache(t))
+
+			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: test.width, Height: test.height}, context.Background())
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+
+			if len(results) != 1 || results[0].Result != test.want {
+				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			}
+		})
+	}
+}
+
+func TestProcessRejectsImageWithZeroHeight(t *testing.T) {
+	data := buildJPEG(t, 64, 64)
+	frameHeader := bytes.Index(data, []byte{0xff, 0xc0})
+	if frameHeader < 0 {
+		t.Fatal("jpeg frame header not found")
+	}
+	data[frameHeader+5], data[frameHeader+6] = 0, 0
+
+	source := serveImage(t, data)
+	resizer := image.NewResizer(buildSettings(), buildCache(t))
+
+	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	if len(results) != 1 || results[0].Result != "failure" {
+		t.Errorf("unexpected results: %+v", results)
+	}
+}
+
 type rejectingCache struct{}
 
 func (rejectingCache) Get(context.Context, string) ([]byte, bool) { return nil, false }
@@ -137,6 +194,7 @@ func buildSettings() *settings.Settings {
 			ImageResizeTimeout: time.Second,
 			MaxImageSize:       1024 * 1024,
 			MaxImagePixels:     1024 * 1024,
+			MaxImageDimension:  1024,
 		},
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{ClientReadTimeout: time.Second},
