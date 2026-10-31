@@ -37,6 +37,19 @@ func (svc *Service) Start() error {
 
 	log.Printf("started http server on port %d\n", svc.settings.Http.ServerPort)
 
+	// Sync requests wait on this machine's one subscription. It outlives the
+	// server, so requests still in flight at shutdown get their notices.
+	listenCtx, stopListening := context.WithCancel(context.Background())
+	listenDone := make(chan struct{})
+	go func() {
+		defer close(listenDone)
+		svc.queue.Listen(listenCtx)
+	}()
+	defer func() {
+		stopListening()
+		<-listenDone
+	}()
+
 	if err := svc.handleSignals(server); err != nil {
 		return errors.Wrap(err, "error shutting down server")
 	}

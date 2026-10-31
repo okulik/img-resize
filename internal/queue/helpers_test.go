@@ -6,6 +6,8 @@ import (
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+
+	"github.com/okulik/img-resize/internal/queue"
 )
 
 type redisHandle struct {
@@ -69,5 +71,83 @@ func (r *redisHandle) waitDone(t *testing.T, sub *redis.PubSub, id string) {
 		if msg.Payload == id {
 			return
 		}
+	}
+}
+
+// numSub counts the subscribers of the completion channel.
+func (r *redisHandle) numSub(t *testing.T) int64 {
+	t.Helper()
+
+	subs, err := r.PubSubNumSub(context.Background(), "resize:done").Result()
+	if err != nil {
+		t.Fatalf("counting subscribers: %v", err)
+	}
+
+	return subs["resize:done"]
+}
+
+// listen runs q.Listen until the test ends and returns once its subscription
+// is in place, so a notice published afterwards is not missed.
+func listen(t *testing.T, q *queue.Queue, r *redisHandle) {
+	t.Helper()
+
+	before := r.numSub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.Listen(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	eventually(t, "the listener to subscribe", func() bool { return r.numSub(t) > before })
+}
+
+// eventually polls cond until it holds, failing the test after 10 seconds.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// startWait runs q.Wait in the background and returns once it is registered.
+func startWait(t *testing.T, q *queue.Queue, ctx context.Context, id string, timeout time.Duration) <-chan waitReturn {
+	t.Helper()
+
+	before := q.WaiterCount()
+	out := make(chan waitReturn, 1)
+	go func() {
+		res, err := q.Wait(ctx, id, timeout)
+		out <- waitReturn{res, err}
+	}()
+	eventually(t, "the waiter to register", func() bool { return q.WaiterCount() > before })
+
+	return out
+}
+
+type waitReturn struct {
+	res queue.WaitResult
+	err error
+}
+
+// receive returns what a Wait returned, failing the test if it takes over 10 seconds.
+func receive(t *testing.T, out <-chan waitReturn) waitReturn {
+	t.Helper()
+
+	select {
+	case got := <-out:
+		return got
+	case <-time.After(10 * time.Second):
+		t.Fatal("Wait did not return")
+		return waitReturn{}
 	}
 }

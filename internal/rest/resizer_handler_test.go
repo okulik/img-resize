@@ -1,10 +1,13 @@
 package rest_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdimage "image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,11 +19,13 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/image"
 	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/rest"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/testredis"
+	"github.com/okulik/img-resize/internal/worker"
 )
 
 func TestResizeEnqueuesJobs(t *testing.T) {
@@ -308,6 +313,152 @@ func TestResizeImageDimensionLimit(t *testing.T) {
 	}
 }
 
+func TestSyncReturnsImage(t *testing.T) {
+	f := newFixture(t)
+	f.listen(t)
+	f.startWorker(t)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = jpeg.Encode(w, stdimage.NewRGBA(stdimage.Rect(0, 0, 8, 8)), nil)
+	}))
+	t.Cleanup(source.Close)
+
+	rec := f.resize(t, "/v1/resize?sync=true", fmt.Sprintf(`{"urls":[%q],"width":4}`, source.URL))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %v, body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Errorf("unexpected Content-Type: %q", got)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if got := img.Bounds().Dx(); got != 4 {
+		t.Errorf("unexpected image width: got %d want 4", got)
+	}
+}
+
+func TestSyncReturnsCachedImage(t *testing.T) {
+	f := newFixture(t)
+	url := "https://example.com/a.jpg"
+	f.cache.Add(context.Background(), model.ImageID(url, 200, 0), []byte("jpeg"))
+
+	rec := f.resize(t, "/v1/resize?sync=true", `{"urls":["`+url+`"],"width":200}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := rec.Body.String(); got != "jpeg" {
+		t.Errorf("unexpected body: %q", got)
+	}
+	if depth := f.depth(t); depth != 0 {
+		t.Errorf("unexpected queue depth: got %d want 0", depth)
+	}
+}
+
+func TestSyncRequiresOneURL(t *testing.T) {
+	f := newFixture(t)
+
+	for _, body := range []string{
+		`{"urls":[],"width":200}`,
+		`{"urls":["https://example.com/a.jpg","https://example.com/b.jpg"],"width":200}`,
+	} {
+		if rec := f.resize(t, "/v1/resize?sync=true", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: unexpected status code: got %v want 400", body, rec.Code)
+		}
+	}
+	if depth := f.depth(t); depth != 0 {
+		t.Errorf("unexpected queue depth: got %d want 0", depth)
+	}
+}
+
+func TestSyncTimeoutReturnsID(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.SyncWaitTimeout = 100 * time.Millisecond })
+	f.listen(t)
+	url := "https://example.com/a.jpg"
+
+	rec := f.resize(t, "/v1/resize?sync=true", `{"urls":["`+url+`"],"width":200}`)
+
+	f.requirePending(t, rec, model.ImageID(url, 200, 0))
+}
+
+func TestSyncFailureReturnsError(t *testing.T) {
+	f := newFixture(t)
+	f.listen(t)
+	f.startWorker(t)
+	url := "ftp://example.com/a.jpg"
+
+	rec := f.resize(t, "/v1/resize?sync=true", `{"urls":["`+url+`"],"width":200}`)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unexpected status code: %v, body %s", rec.Code, rec.Body.String())
+	}
+	want := `{"result":"failure","id":"` + model.ImageID(url, 200, 0) + `","error":"fetch failed","cached":false}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Errorf("unexpected body: got %s want %s", got, want)
+	}
+}
+
+func TestSyncReportsKnownFailureWithoutWaiting(t *testing.T) {
+	f := newFixture(t)
+	url := "https://example.com/a.jpg"
+	id := model.ImageID(url, 200, 0)
+	key := "resize:job:" + id
+	ctx := context.Background()
+	if err := f.client.HSet(ctx, key, "status", "failed", "error", "invalid image").Err(); err != nil {
+		t.Fatalf("seeding failed state: %v", err)
+	}
+	if err := f.client.PExpire(ctx, key, time.Minute).Err(); err != nil {
+		t.Fatalf("expiring failed state: %v", err)
+	}
+
+	rec := f.resize(t, "/v1/resize?sync=true", `{"urls":["`+url+`"],"width":200}`)
+
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"error":"invalid image"`) {
+		t.Errorf("unexpected response: %v %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSyncRedisDown(t *testing.T) {
+	f := newFixture(t)
+	url := "https://example.com/a.jpg"
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- f.resize(t, "/v1/resize?sync=true", `{"urls":["`+url+`"],"width":200}`)
+	}()
+	eventually(t, "the job to be queued", func() bool { return f.depth(t) == 1 })
+
+	// With no listener, the waiter's next recheck of the state fails.
+	if err := f.client.Close(); err != nil {
+		t.Fatalf("closing client: %v", err)
+	}
+
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("unexpected status code: %v", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "service unavailable") {
+			t.Errorf("unexpected body: %s", rec.Body.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("request did not return")
+	}
+}
+
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 type fixture struct {
 	settings *settings.Settings
 	client   *redis.Client
@@ -327,7 +478,19 @@ func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixtur
 			MaxQueueDepth:     100,
 			JobStateTTL:       time.Hour,
 			FailedJobTTL:      time.Minute,
+			SyncWaitTimeout:   time.Minute,
+
+			// What a worker needs.
+			MaxImageSize:            1024 * 1024,
+			MaxImagePixels:          1024 * 1024,
+			MaxImageSourceDimension: 1024,
+			JobClaimIdle:            time.Hour,
+			JobReclaimInterval:      time.Hour,
+			WorkerConcurrency:       1,
+			JobMaxAttempts:          3,
+			AllowInternalURLs:       true,
 		},
+		Http: &settings.HttpSettings{ClientReadTimeout: 10 * time.Second},
 	}
 	for _, tweak := range tweaks {
 		tweak(s.Service)
@@ -340,6 +503,34 @@ func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixtur
 	q := queue.New(client, s)
 
 	return &fixture{settings: s, client: client, cache: imageCache, queue: q, handler: rest.NewResizerHandler(s, imageCache, q)}
+}
+
+// listen runs the queue's listener until the test ends.
+func (f *fixture) listen(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.queue.Listen(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
+// startWorker runs a worker until the test ends.
+func (f *fixture) startWorker(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w := worker.New(f.settings, f.queue, f.cache, image.NewResizer(f.settings))
+	go func() { _ = w.Run(ctx) }()
+	// A worker in a blocked read stops only when the read ends, which closing
+	// the client does, so the test does not wait for it.
+	t.Cleanup(cancel)
 }
 
 func (f *fixture) resize(t *testing.T, path string, body string) *httptest.ResponseRecorder {

@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -64,10 +65,15 @@ const (
 type Queue struct {
 	client   *redis.Client
 	settings *settings.Settings
+
+	// waiters holds the Wait calls in progress by job ID. Listen wakes them.
+	mu      sync.Mutex
+	waiters map[string]map[chan struct{}]struct{}
+	recheck time.Duration
 }
 
 func New(client *redis.Client, settings *settings.Settings) *Queue {
-	return &Queue{client: client, settings: settings}
+	return &Queue{client: client, settings: settings, waiters: map[string]map[chan struct{}]struct{}{}, recheck: defaultRecheck}
 }
 
 // Submit queues job unless a state for its ID already exists. It reports

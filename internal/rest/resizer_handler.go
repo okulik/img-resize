@@ -45,7 +45,8 @@ func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheA
 // A web handler for resizing images. Each image is enqueued as a job for a fleet
 // of background workers, and the resized images are stored to the image cache.
 // The response lists a result with the image ID for every URL, which a client
-// uses to retrieve the image once it's resized.
+// uses to retrieve the image once it's resized. With sync=true the request takes
+// one URL and waits for the resized image instead.
 func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	// Limit POST body size to up to maxRequestSize bytes
 	buffer, err := io.ReadAll(io.LimitReader(r.Body, maxRequestSize))
@@ -63,6 +64,12 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	// Limit the number of images we can resize with a single call
 	if len(resizeReq.URLs) > maxBatchImageCount {
 		web.WriteErrorResponse(w, errors.Errorf("number of images in a batch is limited to %d", maxBatchImageCount), http.StatusBadRequest)
+		return
+	}
+
+	syncMode := r.URL.Query().Get("sync") == "true"
+	if syncMode && len(resizeReq.URLs) != 1 {
+		web.WriteErrorResponse(w, errors.New("sync mode takes exactly one url"), http.StatusBadRequest)
 		return
 	}
 
@@ -86,6 +93,11 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if syncMode {
+		rh.resizeAndWait(w, r, resizeReq.URLs[0], resizeReq.Width, resizeReq.Height)
+		return
+	}
+
 	results := make([]model.ResizeResponse, 0, len(resizeReq.URLs))
 	for _, url := range resizeReq.URLs {
 		result, err := rh.submit(r.Context(), url, resizeReq.Width, resizeReq.Height)
@@ -97,6 +109,63 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.WriteJSONResponse(w, results, http.StatusOK)
+}
+
+// Resizes one image and answers with it, waiting up to SyncWaitTimeout for a
+// worker to finish. A job still unfinished then is answered like an image
+// fetched while its job runs, so the client can fetch it later. If the client
+// disconnects there is nobody to answer, and the job keeps running.
+func (rh *ResizerHandler) resizeAndWait(w http.ResponseWriter, r *http.Request, url string, width uint, height uint) {
+	ctx := r.Context()
+	id := model.ImageID(url, width, height)
+
+	data, ok, err := rh.imageCache.Get(ctx, id)
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return
+	}
+	if ok {
+		writeImageResponse(w, data)
+		return
+	}
+
+	submission, err := rh.queue.Submit(ctx, model.Job{ID: id, URL: url, Width: width, Height: height})
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return
+	}
+	if submission == queue.Failed {
+		// The job failed already, so report that instead of waiting.
+		rh.serveImage(ctx, w, id)
+		return
+	}
+
+	res, err := rh.queue.Wait(ctx, id, rh.settings.Service.SyncWaitTimeout)
+	if err != nil {
+		if ctx.Err() == nil {
+			rh.writeUnavailable(w, err)
+		}
+		return
+	}
+
+	switch res.Outcome {
+	case queue.WaitFailed:
+		writeJobFailed(w, id, res.Error)
+	case queue.WaitDone:
+		data, ok, err := rh.imageCache.Get(ctx, id)
+		if err != nil {
+			rh.writeUnavailable(w, err)
+			return
+		}
+		if ok {
+			writeImageResponse(w, data)
+			return
+		}
+		// The image is gone already, so let the client ask again.
+		writeJobPending(w, id)
+	default:
+		writeJobPending(w, id)
+	}
 }
 
 // Reports the outcome of a resize of one image, enqueueing a job unless the
@@ -137,9 +206,11 @@ func (rh *ResizerHandler) writeUnavailable(w http.ResponseWriter, err error) {
 // is queued or running, 422 once it failed, and 404 if there is no such job. A
 // Redis failure is 503, as it says nothing about the image.
 func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	imageID := chi.URLParam(r, "imageID")
+	rh.serveImage(r.Context(), w, chi.URLParam(r, "imageID"))
+}
 
+// Answers with the image if there is one, or else with the state of its job.
+func (rh *ResizerHandler) serveImage(ctx context.Context, w http.ResponseWriter, imageID string) {
 	data, ok, err := rh.imageCache.Get(ctx, imageID)
 	if err != nil {
 		rh.writeUnavailable(w, err)
@@ -173,11 +244,19 @@ func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if state.Status == queue.StatusFailed {
-		web.WriteJSONResponse(w, model.ResizeResponse{Result: statusFailure, ID: imageID, Error: state.Error}, http.StatusUnprocessableEntity)
+		writeJobFailed(w, imageID, state.Error)
 		return
 	}
 
-	web.WriteJSONResponse(w, model.ResizeResponse{Result: statusEnqueued, ID: imageID}, http.StatusAccepted)
+	writeJobPending(w, imageID)
+}
+
+func writeJobFailed(w http.ResponseWriter, id string, reason string) {
+	web.WriteJSONResponse(w, model.ResizeResponse{Result: statusFailure, ID: id, Error: reason}, http.StatusUnprocessableEntity)
+}
+
+func writeJobPending(w http.ResponseWriter, id string) {
+	web.WriteJSONResponse(w, model.ResizeResponse{Result: statusEnqueued, ID: id}, http.StatusAccepted)
 }
 
 func writeImageResponse(w http.ResponseWriter, data []byte) {

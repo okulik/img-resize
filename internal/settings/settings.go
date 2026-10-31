@@ -25,6 +25,7 @@ type ServiceSettings struct {
 	WorkerConcurrency       int           `envconfig:"SVC_WORKER_CONCURRENCY" default:"1"`
 	JobMaxAttempts          int64         `envconfig:"SVC_JOB_MAX_ATTEMPTS" default:"3"`
 	MaxQueueDepth           int64         `envconfig:"SVC_MAX_QUEUE_DEPTH" default:"10000"`
+	SyncWaitTimeout         time.Duration `envconfig:"SVC_SYNC_WAIT_TIMEOUT" default:"15s"`
 	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
 }
 
