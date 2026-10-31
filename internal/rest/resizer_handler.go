@@ -156,6 +156,18 @@ func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
+		// The job may have finished since the first read, storing the image and
+		// then dropping its state, so look once more before calling it unknown.
+		data, ok, err := rh.imageCache.Get(ctx, imageID)
+		if err != nil {
+			rh.writeUnavailable(w, err)
+			return
+		}
+		if ok {
+			writeImageResponse(w, data)
+			return
+		}
+
 		web.WriteErrorResponse(w, errors.New("image not cached"), http.StatusNotFound)
 		return
 	}

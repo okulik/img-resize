@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -237,6 +238,19 @@ func TestGetImageUnknown(t *testing.T) {
 	}
 }
 
+func TestGetImageFinishingBetweenReads(t *testing.T) {
+	f := newFixture(t)
+	// The worker stores the image and drops the job state after the first read.
+	f.handler = rest.NewResizerHandler(f.settings, &missesFirstGet{ImageCacheAdapter: f.cache}, f.queue)
+	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
+
+	rec := f.get("/v1/image/abc")
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "jpeg" {
+		t.Errorf("unexpected response: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetImageRedisDown(t *testing.T) {
 	f := newFixture(t)
 	if err := f.client.Close(); err != nil {
@@ -406,4 +420,18 @@ type failingCache struct {
 
 func (failingCache) Contains(context.Context, string) (bool, error) {
 	return false, errors.New("redis down")
+}
+
+// missesFirstGet misses on the first Get, whatever is cached.
+type missesFirstGet struct {
+	cache.ImageCacheAdapter
+	gets atomic.Int64
+}
+
+func (c *missesFirstGet) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	if c.gets.Add(1) == 1 {
+		return nil, false, nil
+	}
+
+	return c.ImageCacheAdapter.Get(ctx, key)
 }
