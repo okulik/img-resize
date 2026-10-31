@@ -52,7 +52,7 @@ func NewResizer(settings *settings.Settings, imageCache cache.ImageCacheAdapter)
 	return &Resizer{
 		settings:         settings,
 		imageCache:       imageCache,
-		httpClient:       &http.Client{Timeout: settings.Http.ClientReadTimeout},
+		httpClient:       newHTTPClient(settings),
 		resizeJobs:       make(chan *ResizeJob, maxResizeJobsSize),
 		resizingProgress: NewResizingProgress(settings),
 	}

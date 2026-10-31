@@ -19,6 +19,7 @@ type ServiceSettings struct {
 	RedisHost          string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
 	RedisPort          int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
 	RedisPassword      string        `envconfig:"SVC_REDIS_PASSWORD"`
+	AllowInternalURLs  bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
 }
 
 type HttpSettings struct {
