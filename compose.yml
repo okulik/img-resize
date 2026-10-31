@@ -8,6 +8,7 @@ services:
       - APP_ENV=${APP_ENV:-development}
       - AUTH_USERNAME=admin
       - AUTH_PASSWORD=admin
+      - SVC_ROLE=web
       - SVC_REDIS_HOST=redis
       - SVC_REDIS_PASSWORD=${SVC_REDIS_PASSWORD:-resizer-dev}
     ports:
@@ -15,6 +16,17 @@ services:
         published: "4000"
         protocol: tcp
         mode: host
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: .
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - SVC_ROLE=worker
+      - SVC_REDIS_HOST=redis
+      - SVC_REDIS_PASSWORD=${SVC_REDIS_PASSWORD:-resizer-dev}
     depends_on:
       - redis
 

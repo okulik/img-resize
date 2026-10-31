@@ -108,3 +108,68 @@ func TestSettingsJobReclaimInterval(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsLoadRole(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"default", "", "web"},
+		{"worker", "worker", "worker"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SVC_ROLE", test.env)
+			if test.env == "" {
+				os.Unsetenv("SVC_ROLE")
+			}
+
+			settings, err := settings.Load()
+			if err != nil {
+				t.Fatalf("unable to load settings: %v", err)
+			}
+
+			if settings.Service.Role != test.want {
+				t.Errorf("unexpected role: got %q want %q", settings.Service.Role, test.want)
+			}
+		})
+	}
+}
+
+func TestSettingsLoadRejectsUnknownRole(t *testing.T) {
+	t.Setenv("SVC_ROLE", "cron")
+
+	if _, err := settings.Load(); err == nil {
+		t.Fatal("expected an error for an unknown role")
+	}
+}
+
+func TestSettingsLoadRequiresAuthOnlyForWeb(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		username string
+		password string
+		wantErr  bool
+	}{
+		{"web without username", "web", "", "secret", true},
+		{"web without password", "web", "admin", "", true},
+		{"web with both", "web", "admin", "secret", false},
+		{"worker without either", "worker", "", "", false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SVC_ROLE", test.role)
+			t.Setenv("AUTH_USERNAME", test.username)
+			t.Setenv("AUTH_PASSWORD", test.password)
+
+			_, err := settings.Load()
+			if (err != nil) != test.wantErr {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

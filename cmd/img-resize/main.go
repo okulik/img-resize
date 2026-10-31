@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 
@@ -16,39 +15,36 @@ import (
 )
 
 func main() {
-	settings, err := settings.Load()
-	if err != nil {
+	if err := run(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func run() error {
+	cfg, err := settings.Load()
+	if err != nil {
+		return err
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", settings.Service.RedisHost, settings.Service.RedisPort),
-		Password: settings.Service.RedisPassword,
+		Addr:     fmt.Sprintf("%s:%d", cfg.Service.RedisHost, cfg.Service.RedisPort),
+		Password: cfg.Service.RedisPassword,
 		DB:       0,
 	})
+	defer func() { _ = client.Close() }()
 
-	cache, err := cache.NewRedisImageCache(client, settings)
+	cache, err := cache.NewRedisImageCache(client, cfg)
 	if err != nil {
-		log.Panicf("Faild to create image cache: %v", err)
+		return fmt.Errorf("failed to create image cache: %w", err)
 	}
 
-	jobs := queue.New(client, settings)
+	jobs := queue.New(client, cfg)
 
-	// Run a worker in this process until the service stops.
-	workerCtx, stopWorker := context.WithCancel(context.Background())
-	workerDone := make(chan struct{})
-	go func() {
-		defer close(workerDone)
-		if err := worker.New(settings, jobs, cache, image.NewResizer(settings)).Run(workerCtx); err != nil {
-			log.Printf("worker stopped: %v", err)
-		}
-	}()
-
-	svc := service.NewService(settings, cache, jobs)
-	err = svc.Start()
-	stopWorker()
-	<-workerDone
-	if err != nil {
-		log.Fatal(err)
+	// Load accepts no other role.
+	if cfg.Service.Role == settings.RoleWorker {
+		w := worker.New(cfg, jobs, cache, image.NewResizer(cfg))
+		return worker.NewService(cfg, w).Start()
 	}
+
+	return service.NewService(cfg, cache, jobs).Start()
 }

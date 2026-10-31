@@ -8,7 +8,13 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
+const (
+	RoleWeb    = "web"
+	RoleWorker = "worker"
+)
+
 type ServiceSettings struct {
+	Role                    string        `envconfig:"SVC_ROLE" default:"web"`
 	ImageCacheSize          int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
 	ImageCacheTTL           time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
 	MaxImageSize            int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
@@ -40,8 +46,8 @@ type HttpSettings struct {
 }
 
 type AuthSettings struct {
-	Username string `envconfig:"AUTH_USERNAME" required:"true"`
-	Password string `envconfig:"AUTH_PASSWORD" required:"true"`
+	Username string `envconfig:"AUTH_USERNAME"`
+	Password string `envconfig:"AUTH_PASSWORD"`
 	Realm    string `envconfig:"AUTH_REALM" default:"localhost"`
 }
 
@@ -60,6 +66,16 @@ func Load() (*Settings, error) {
 	settings := &Settings{}
 	if err := envconfig.Process("", settings); err != nil {
 		return nil, err
+	}
+
+	switch settings.Service.Role {
+	case RoleWeb:
+		if settings.Auth.Username == "" || settings.Auth.Password == "" {
+			return nil, fmt.Errorf("AUTH_USERNAME and AUTH_PASSWORD are required for the %s role", RoleWeb)
+		}
+	case RoleWorker:
+	default:
+		return nil, fmt.Errorf("unknown SVC_ROLE %q, expected %q or %q", settings.Service.Role, RoleWeb, RoleWorker)
 	}
 
 	return settings, nil

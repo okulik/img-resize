@@ -47,6 +47,10 @@ clean: ## Cleans build files and artifacts
 run: ## Starts the service in dev environment
 	go run cmd/$(SVCNAME)/main.go
 
+.PHONY: run-worker
+run-worker: ## Starts a worker in dev environment
+	SVC_ROLE=worker HTTP_SERVER_PORT=4001 go run cmd/$(SVCNAME)/main.go
+
 .PHONY: lint
 lint: tools ## Installs golang linter
 	$(TOOLSBIN)/golangci-lint run
