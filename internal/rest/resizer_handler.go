@@ -26,6 +26,7 @@ const (
 	imageCacheControl  = "private, max-age=900"
 
 	requestsBucket = "requests"
+	bytesBucket    = "bytes"
 
 	statusSuccess  = "success"
 	statusFailure  = "failure"
@@ -123,13 +124,19 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 }
 
 // Counts the URLs of a request against the limit of the client's network and
-// answers 429 or 503 when the request must not go on. Clients are told apart by
-// prefix, as one IPv6 client usually controls many addresses.
+// answers 429 or 503 when the request must not go on.
 func (rh *ResizerHandler) allowRequest(w http.ResponseWriter, r *http.Request, urls int) bool {
+	return rh.allow(w, r, requestsBucket, int64(urls), rh.settings.Service.RateLimitPerMinute)
+}
+
+// Counts amount in bucket against limit for the client's network, and answers
+// 429 or 503 when the request must not go on. Clients are told apart by prefix,
+// as one IPv6 client usually controls many addresses.
+func (rh *ResizerHandler) allow(w http.ResponseWriter, r *http.Request, bucket string, amount int64, limit int64) bool {
 	cfg := rh.settings.Service
 	key := ratelimit.PrefixKey(ratelimit.ClientIP(r, cfg.TrustFlyClientIP), cfg.RateLimitIPv4Prefix, cfg.RateLimitIPv6Prefix)
 
-	allowed, retryAfter, err := rh.limiter.Allow(r.Context(), requestsBucket, key, int64(urls), cfg.RateLimitPerMinute)
+	allowed, retryAfter, err := rh.limiter.Allow(r.Context(), bucket, key, amount, limit)
 	if err != nil {
 		rh.writeUnavailable(w, err)
 		return false
@@ -158,7 +165,7 @@ func (rh *ResizerHandler) resizeAndWait(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if ok {
-		writeImageResponse(w, data)
+		rh.writeImageResponse(w, r, data)
 		return
 	}
 
@@ -169,7 +176,7 @@ func (rh *ResizerHandler) resizeAndWait(w http.ResponseWriter, r *http.Request, 
 	}
 	if submission == queue.Failed {
 		// The job failed already, so report that instead of waiting.
-		rh.serveImage(ctx, w, id)
+		rh.serveImage(w, r, id)
 		return
 	}
 
@@ -195,7 +202,7 @@ func (rh *ResizerHandler) resizeAndWait(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		if ok {
-			writeImageResponse(w, data)
+			rh.writeImageResponse(w, r, data)
 			return
 		}
 		// The image is gone already, so let the client ask again.
@@ -243,18 +250,19 @@ func (rh *ResizerHandler) writeUnavailable(w http.ResponseWriter, err error) {
 // is queued or running, 422 once it failed, and 404 if there is no such job. A
 // Redis failure is 503, as it says nothing about the image.
 func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
-	rh.serveImage(r.Context(), w, chi.URLParam(r, "imageID"))
+	rh.serveImage(w, r, chi.URLParam(r, "imageID"))
 }
 
 // Answers with the image if there is one, or else with the state of its job.
-func (rh *ResizerHandler) serveImage(ctx context.Context, w http.ResponseWriter, imageID string) {
+func (rh *ResizerHandler) serveImage(w http.ResponseWriter, r *http.Request, imageID string) {
+	ctx := r.Context()
 	data, ok, err := rh.imageCache.Get(ctx, imageID)
 	if err != nil {
 		rh.writeUnavailable(w, err)
 		return
 	}
 	if ok {
-		writeImageResponse(w, data)
+		rh.writeImageResponse(w, r, data)
 		return
 	}
 
@@ -272,7 +280,7 @@ func (rh *ResizerHandler) serveImage(ctx context.Context, w http.ResponseWriter,
 			return
 		}
 		if ok {
-			writeImageResponse(w, data)
+			rh.writeImageResponse(w, r, data)
 			return
 		}
 
@@ -296,7 +304,14 @@ func writeJobPending(w http.ResponseWriter, id string) {
 	web.WriteJSONResponse(w, model.ResizeResponse{Result: statusEnqueued, ID: id}, http.StatusAccepted)
 }
 
-func writeImageResponse(w http.ResponseWriter, data []byte) {
+// Sends an image after counting its size against the byte limit of the client's
+// network. Every image leaves through here, and nothing is written before the
+// count is allowed.
+func (rh *ResizerHandler) writeImageResponse(w http.ResponseWriter, r *http.Request, data []byte) {
+	if !rh.allow(w, r, bytesBucket, int64(len(data)), rh.settings.Service.RateLimitBytesPerMinute) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", imageCacheControl)
 	w.WriteHeader(http.StatusOK)

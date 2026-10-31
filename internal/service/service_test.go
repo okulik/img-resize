@@ -139,6 +139,7 @@ func buildServiceSettings(t *testing.T) *settings.Settings {
 			JobMaxAttempts:          3,
 			WorkerConcurrency:       1,
 			RateLimitPerMinute:      1000,
+			RateLimitBytesPerMinute: 1 << 30,
 			RateLimitIPv4Prefix:     32,
 			RateLimitIPv6Prefix:     64,
 			MaxQueueDepth:           100,

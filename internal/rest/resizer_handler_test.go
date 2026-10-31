@@ -476,6 +476,106 @@ func TestSyncRedisDown(t *testing.T) {
 	}
 }
 
+func TestGetImageThrottledByBytes(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.RateLimitBytesPerMinute = 6 })
+	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
+	if rec := f.get("/v1/image/abc"); rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code for the first request: %v", rec.Code)
+	}
+
+	rec := f.get("/v1/image/abc")
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" || got == "0" {
+		t.Errorf("unexpected Retry-After: %q", got)
+	}
+	if rec.Header().Get("Content-Type") == "image/jpeg" || strings.Contains(rec.Body.String(), "jpeg") {
+		t.Errorf("image was written: %q", rec.Body.String())
+	}
+}
+
+func TestGetImageByteThrottleRedisDown(t *testing.T) {
+	f := newFixture(t)
+	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
+	f.handler = rest.NewResizerHandler(f.settings, f.cache, f.queue, ratelimit.New(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}), time.Now))
+
+	rec := f.get("/v1/image/abc")
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "service unavailable") {
+		t.Errorf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestSyncThrottledByBytes(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.RateLimitBytesPerMinute = 6 })
+	url := "https://example.com/a.jpg"
+	body := fmt.Sprintf(`{"urls":[%q],"width":200}`, url)
+	f.cache.Add(context.Background(), model.ImageID(url, 200, 0), []byte("jpeg"))
+	if rec := f.resize(t, "/v1/resize?sync=true", body); rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code for the first request: %v", rec.Code)
+	}
+
+	rec := f.resize(t, "/v1/resize?sync=true", body)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" || got == "0" {
+		t.Errorf("unexpected Retry-After: %q", got)
+	}
+}
+
+func TestSyncOverByteLimitStillCompletesJob(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.RateLimitBytesPerMinute = 1 })
+	f.listen(t)
+	f.startWorker(t)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = jpeg.Encode(w, stdimage.NewRGBA(stdimage.Rect(0, 0, 8, 8)), nil)
+	}))
+	t.Cleanup(source.Close)
+
+	rec := f.resize(t, "/v1/resize?sync=true", fmt.Sprintf(`{"urls":[%q],"width":4}`, source.URL))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %v, body %s", rec.Code, rec.Body.String())
+	}
+	id := model.ImageID(source.URL, 4, 0)
+	eventually(t, "the job to store the image", func() bool {
+		_, ok, err := f.cache.Get(context.Background(), id)
+		return err == nil && ok
+	})
+}
+
+func TestGetImageStateIsNotCounted(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.RateLimitBytesPerMinute = 1 })
+	f.submit(t, "queued")
+	for i := 0; i < 3; i++ {
+		f.requirePending(t, f.get("/v1/image/queued"), "queued")
+	}
+	if rec := f.get("/v1/image/unknown"); rec.Code != http.StatusNotFound {
+		t.Errorf("unexpected status code: %v", rec.Code)
+	}
+}
+
+func TestSyncTimeoutIsNotCounted(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) {
+		s.RateLimitBytesPerMinute = 1
+		s.SyncWaitTimeout = 50 * time.Millisecond
+	})
+	f.listen(t)
+	body := `{"urls":["https://example.com/a.jpg"],"width":200}`
+	for i := 0; i < 2; i++ {
+		if rec := f.resize(t, "/v1/resize?sync=true", body); rec.Code != http.StatusAccepted {
+			t.Fatalf("unexpected status code: %v", rec.Code)
+		}
+	}
+}
+
 func TestResizeThrottled(t *testing.T) {
 	f := newFixture(t, func(s *settings.ServiceSettings) { s.RateLimitPerMinute = 1 })
 	body := `{"urls":["https://example.com/a.jpg"],"width":200}`
@@ -573,9 +673,10 @@ func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixtur
 			SyncWaitTimeout:   time.Minute,
 
 			// A limit that does not get in the way of other tests.
-			RateLimitPerMinute:  1_000_000,
-			RateLimitIPv4Prefix: 32,
-			RateLimitIPv6Prefix: 64,
+			RateLimitPerMinute:      1_000_000,
+			RateLimitBytesPerMinute: 1 << 40,
+			RateLimitIPv4Prefix:     32,
+			RateLimitIPv6Prefix:     64,
 
 			// What a worker needs.
 			MaxImageSize:            1024 * 1024,
