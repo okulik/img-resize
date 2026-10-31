@@ -167,13 +167,13 @@ func (q *Queue) Read(ctx context.Context, consumer string, block time.Duration) 
 	return &Delivery{Job: job, MessageID: msg.ID, Attempts: 1}, nil
 }
 
-// Reclaim takes over up to WorkerConcurrency jobs that have been pending
-// longer than JobClaimIdle, which are those of crashed or stuck workers. Every
-// claim counts as a delivery, so it claims no more than the caller starts. A job already delivered
-// JobMaxAttempts times is failed and counted in abandoned instead of being
-// returned. Reclaim keeps going after a per-job error and returns the
-// deliveries it did claim together with the joined errors, so callers must
-// process the deliveries even when err is set.
+// Reclaim takes over one job that has been pending longer than JobClaimIdle,
+// which is one of a crashed or stuck worker. Every claim counts as a delivery,
+// so a job is claimed only when the caller can start it, and deliveries never
+// holds more than one. A job already delivered JobMaxAttempts times is failed
+// and counted in abandoned instead of being returned. Reclaim keeps going after
+// a per-job error and returns the delivery it did claim together with the
+// joined errors, so callers must process the delivery even when err is set.
 func (q *Queue) Reclaim(ctx context.Context, consumer string) (deliveries []Delivery, abandoned int, err error) {
 	var errs []error
 	start := "0-0"
@@ -184,7 +184,7 @@ func (q *Queue) Reclaim(ctx context.Context, consumer string) (deliveries []Deli
 			Consumer: consumer,
 			MinIdle:  q.settings.Service.JobClaimIdle,
 			Start:    start,
-			Count:    int64(max(q.settings.Service.WorkerConcurrency, 1)),
+			Count:    1,
 		}).Result()
 		if claimErr != nil {
 			errs = append(errs, fmt.Errorf("claiming idle jobs: %w", claimErr))
@@ -223,9 +223,9 @@ func (q *Queue) Reclaim(ctx context.Context, consumer string) (deliveries []Deli
 			deliveries = append(deliveries, d)
 		}
 
-		// Claim more only if this pass produced nothing to run, so dropped
+		// Claim again only if this pass produced nothing to run, so dropped
 		// and abandoned entries cannot hold up real work. Jobs left
-		// unclaimed keep their delivery count for the next tick.
+		// unclaimed keep their delivery count for the next call.
 		if len(deliveries) > 0 || next == "0-0" || next == "" {
 			break
 		}

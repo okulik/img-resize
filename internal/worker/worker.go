@@ -129,17 +129,22 @@ func (w *Worker) reclaimLoop(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		if !w.acquire(ctx) {
-			return
+		for w.reclaimOne(ctx) {
 		}
-		w.reclaim(context.WithoutCancel(ctx))
-		w.release()
 	}
 }
 
-// reclaim takes ctx uncancelled, as stopping halfway would cost the claimed
-// jobs an attempt without running them.
-func (w *Worker) reclaim(ctx context.Context) {
+// reclaimOne takes a slot and runs one reclaimed job in it, and reports whether
+// there may be more. Giving the slot back between jobs lets the read loops take
+// their turn, and on shutdown stops further claims. Once claimed, a job runs on
+// an uncancelled context, as stopping would cost it an attempt without running.
+func (w *Worker) reclaimOne(ctx context.Context) bool {
+	if !w.acquire(ctx) {
+		return false
+	}
+	defer w.release()
+
+	ctx = context.WithoutCancel(ctx)
 	deliveries, _, err := w.queue.Reclaim(ctx, w.consumer)
 	if err != nil {
 		log.Printf("reclaiming jobs: %v", err)
@@ -148,6 +153,8 @@ func (w *Worker) reclaim(ctx context.Context) {
 	for _, delivery := range deliveries {
 		w.handle(ctx, delivery)
 	}
+
+	return len(deliveries) > 0
 }
 
 // handle runs one delivery. Returning without Complete or Fail leaves the job

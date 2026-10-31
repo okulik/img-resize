@@ -32,11 +32,10 @@ func newQueueWith(t *testing.T, tweak func(*settings.ServiceSettings)) (*queue.Q
 
 	client := testredis.Client(t, 2)
 	svc := &settings.ServiceSettings{
-		JobStateTTL:       time.Hour,
-		FailedJobTTL:      5 * time.Minute,
-		JobClaimIdle:      time.Hour,
-		JobMaxAttempts:    3,
-		WorkerConcurrency: 1,
+		JobStateTTL:    time.Hour,
+		FailedJobTTL:   5 * time.Minute,
+		JobClaimIdle:   time.Hour,
+		JobMaxAttempts: 3,
 	}
 	tweak(svc)
 	cfg := &settings.Settings{Service: svc}
@@ -634,11 +633,19 @@ func otherJob() model.Job {
 	}
 }
 
-func TestReclaimClaimsOnlyWorkerConcurrencyJobs(t *testing.T) {
-	q, r, _ := readyQueue(t, 10*time.Millisecond)
+func TestReclaimClaimsOneJob(t *testing.T) {
+	q, r := newQueueWith(t, func(s *settings.ServiceSettings) {
+		s.JobClaimIdle = 10 * time.Millisecond
+		s.WorkerConcurrency = 2
+	})
 	ctx := context.Background()
-	if _, err := q.Submit(ctx, otherJob()); err != nil {
+	if err := q.EnsureGroup(ctx); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, job := range []model.Job{testJob(), otherJob()} {
+		if _, err := q.Submit(ctx, job); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	}
 
 	for i := 0; i < 2; i++ {

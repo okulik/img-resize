@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -217,7 +218,7 @@ func TestWorkerFinishesJobClaimedDuringShutdown(t *testing.T) {
 	f.requireFinished(t, job)
 }
 
-func TestWorkerFinishesAllReclaimedJobsOnShutdown(t *testing.T) {
+func TestWorkerClaimsNoMoreJobsOnShutdown(t *testing.T) {
 	f := newFixture(t, shortIdle, func(s *settings.ServiceSettings) { s.WorkerConcurrency = 2 })
 	src, gate := gatedSource(t)
 	first := f.submitToDeadConsumer(t, src.URL+"/1")
@@ -233,7 +234,23 @@ func TestWorkerFinishesAllReclaimedJobsOnShutdown(t *testing.T) {
 	r.stop(t)
 
 	f.requireResized(t, first)
-	f.requireResized(t, second)
+	if got, want := src.paths(), []string{"/1"}; !slices.Equal(got, want) {
+		t.Errorf("unexpected source requests: got %v want %v", got, want)
+	}
+
+	// The job stays with its dead consumer, without having lost an attempt.
+	pending, err := f.client.XPendingExt(context.Background(), &redis.XPendingExtArgs{
+		Stream: "resize:jobs", Group: "resize-workers", Start: "-", End: "+", Count: 10,
+	}).Result()
+	if err != nil {
+		t.Fatalf("reading pending jobs: %v", err)
+	}
+	if len(pending) != 1 || pending[0].Consumer != "dead" || pending[0].RetryCount != 1 {
+		t.Errorf("unexpected pending jobs: %+v", pending)
+	}
+	if !f.hasState(t, second) {
+		t.Error("second job lost its state")
+	}
 }
 
 func TestWorkerSurvivesRedisErrors(t *testing.T) {
@@ -339,18 +356,18 @@ func TestWorkerKeepsReadingAfterReadError(t *testing.T) {
 }
 
 func TestWorkerRunsReclaimedJobsWhenReclaimReportsError(t *testing.T) {
-	f := newFixture(t, shortIdle, func(s *settings.ServiceSettings) { s.WorkerConcurrency = 2 })
+	f := newFixture(t, shortIdle)
 	src := imageSource(t)
 	first := f.submitToDeadConsumer(t, src.URL+"/1")
 	second := f.submitToDeadConsumer(t, src.URL+"/2")
 
-	// The first job's lookup fails, so the only claim that succeeds returns the
+	// The first job's lookup fails, so Reclaim claims again and returns the
 	// second job together with an error. No later claim can run it instead.
 	var claims, lookups atomic.Int64
 	f.client.AddHook(hook{before: func(cmd redis.Cmder) error {
 		switch cmd.Name() {
 		case "xautoclaim":
-			if claims.Add(1) > 1 {
+			if claims.Add(1) > 2 {
 				return errInjected
 			}
 		case "xpending":
@@ -367,6 +384,131 @@ func TestWorkerRunsReclaimedJobsWhenReclaimReportsError(t *testing.T) {
 	f.requireResized(t, second)
 	if f.cache.Contains(context.Background(), first.ID) {
 		t.Error("first job ran, so the test no longer covers a partial reclaim")
+	}
+}
+
+func TestWorkerClaimsOnlyJobsItCanStart(t *testing.T) {
+	f := newFixture(t, shortIdle, func(s *settings.ServiceSettings) { s.WorkerConcurrency = 2 })
+	data := buildJPEG(t, 64, 64)
+
+	// busy counts slots seen in use elsewhere. It can miss one around a read or
+	// a fetch, but it never counts a free one.
+	var busy atomic.Int64
+	src := newSource(t, func(_ int64, w http.ResponseWriter, _ *http.Request) {
+		busy.Add(1)
+		defer busy.Add(-1)
+		_, _ = w.Write(data)
+	})
+	first := f.submitToDeadConsumer(t, src.URL+"/1")
+	second := f.submitToDeadConsumer(t, src.URL+"/2")
+
+	var mu sync.Mutex
+	claims := map[string]int{}
+	var claimed, slotless, waiting int64
+	f.client.AddHook(hook{
+		before: func(cmd redis.Cmder) error {
+			switch cmd.Name() {
+			case "xreadgroup":
+				busy.Add(1)
+			case "xautoclaim":
+				if busy.Load() >= 2 {
+					mu.Lock()
+					defer mu.Unlock()
+					slotless++
+				}
+			}
+			return nil
+		},
+		after: func(cmd redis.Cmder) {
+			switch read := cmd.(type) {
+			case *redis.XStreamSliceCmd:
+				busy.Add(-1)
+			case *redis.XAutoClaimCmd:
+				msgs, _ := read.Val()
+				mu.Lock()
+				defer mu.Unlock()
+				for _, msg := range msgs {
+					claims[msg.ID]++
+					claimed++
+				}
+				waiting = max(waiting, claimed-src.requests.Load())
+			}
+		},
+	})
+
+	f.start(t)
+
+	f.waitFinished(t, first)
+	f.waitFinished(t, second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(claims) != 2 {
+		t.Errorf("unexpected claimed jobs: %v", claims)
+	}
+	for id, n := range claims {
+		if n != 1 {
+			t.Errorf("job %s claimed %d times", id, n)
+		}
+	}
+	if slotless != 0 {
+		t.Errorf("claimed %d times with no slot free", slotless)
+	}
+	if waiting != 1 {
+		t.Errorf("unexpected most claimed jobs not yet started: %d", waiting)
+	}
+}
+
+func TestWorkerReclaimsEveryIdleJobInOneTick(t *testing.T) {
+	const interval = 3 * time.Second
+
+	f := newFixture(t, shortIdle, func(s *settings.ServiceSettings) { s.JobReclaimInterval = interval })
+	src := imageSource(t)
+	first := f.submitToDeadConsumer(t, src.URL+"/1")
+	second := f.submitToDeadConsumer(t, src.URL+"/2")
+
+	var mu sync.Mutex
+	var claimedAt []time.Time
+	f.client.AddHook(hook{after: func(cmd redis.Cmder) {
+		if claim, ok := cmd.(*redis.XAutoClaimCmd); ok {
+			if msgs, _ := claim.Val(); len(msgs) > 0 {
+				mu.Lock()
+				defer mu.Unlock()
+				claimedAt = append(claimedAt, time.Now())
+			}
+		}
+	}})
+
+	f.start(t)
+
+	f.waitFinished(t, first)
+	f.waitFinished(t, second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(claimedAt) != 2 {
+		t.Fatalf("unexpected claims: %d", len(claimedAt))
+	}
+	if gap := claimedAt[1].Sub(claimedAt[0]); gap >= interval {
+		t.Errorf("second job waited %v for another tick", gap)
+	}
+}
+
+func TestWorkerLetsReadsRunBetweenReclaimedJobs(t *testing.T) {
+	f := newFixture(t, shortIdle)
+	src, gate := gatedSource(t)
+	f.submitToDeadConsumer(t, src.URL+"/reclaimed/1")
+	f.submitToDeadConsumer(t, src.URL+"/reclaimed/2")
+
+	f.start(t)
+	gate.waitStarted(t)
+	job := f.submit(t, src.URL+"/new")
+	gate.open()
+
+	f.waitFinished(t, job)
+	want := []string{"/reclaimed/1", "/new"}
+	if got := src.paths(); len(got) < 2 || !slices.Equal(got[:2], want) {
+		t.Errorf("unexpected source requests: got %v want them to start with %v", got, want)
 	}
 }
 
@@ -562,6 +704,17 @@ func (f *fixture) waitFinished(t *testing.T, job model.Job) {
 	})
 }
 
+func (f *fixture) hasState(t *testing.T, job model.Job) bool {
+	t.Helper()
+
+	_, ok, err := f.queue.State(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("reading state: %v", err)
+	}
+
+	return ok
+}
+
 func (f *fixture) requireFinished(t *testing.T, job model.Job) {
 	t.Helper()
 
@@ -687,6 +840,9 @@ func (r *run) wait(t *testing.T) {
 type source struct {
 	*httptest.Server
 	requests atomic.Int64
+
+	mu    sync.Mutex
+	order []string
 }
 
 func newSource(t *testing.T, respond func(n int64, w http.ResponseWriter, r *http.Request)) *source {
@@ -694,11 +850,22 @@ func newSource(t *testing.T, respond func(n int64, w http.ResponseWriter, r *htt
 
 	s := &source{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.order = append(s.order, r.URL.Path)
+		s.mu.Unlock()
 		respond(s.requests.Add(1), w, r)
 	}))
 	t.Cleanup(s.Close)
 
 	return s
+}
+
+// paths lists the requested paths, oldest first.
+func (s *source) paths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.order)
 }
 
 func imageSource(t *testing.T) *source {
