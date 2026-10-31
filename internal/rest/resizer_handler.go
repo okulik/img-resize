@@ -142,9 +142,13 @@ func (rh *ResizerHandler) resizeAndWait(w http.ResponseWriter, r *http.Request, 
 
 	res, err := rh.queue.Wait(ctx, id, rh.settings.Service.SyncWaitTimeout)
 	if err != nil {
-		if ctx.Err() == nil {
-			rh.writeUnavailable(w, err)
+		if ctx.Err() != nil {
+			// A client that left won't read this, but when the server shuts down
+			// first, the client learns the ID to fetch the image with later.
+			writeJobPending(w, id)
+			return
 		}
+		rh.writeUnavailable(w, err)
 		return
 	}
 

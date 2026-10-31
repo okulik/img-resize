@@ -420,6 +420,34 @@ func TestSyncReportsKnownFailureWithoutWaiting(t *testing.T) {
 	}
 }
 
+func TestSyncInterruptedWaitReturnsID(t *testing.T) {
+	f := newFixture(t)
+	f.listen(t)
+	url := "https://example.com/a.jpg"
+	req := httptest.NewRequest("POST", "/v1/resize?sync=true", strings.NewReader(`{"urls":["`+url+`"],"width":200}`))
+	ctx, cancel := context.WithCancel(req.Context())
+	t.Cleanup(cancel)
+	rec := httptest.NewRecorder()
+	router := chi.NewRouter()
+	router.Post("/v1/resize", f.handler.ResizeImage)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		router.ServeHTTP(rec, req.WithContext(ctx))
+	}()
+	eventually(t, "the job to be queued", func() bool { return f.depth(t) == 1 })
+
+	// As when the server shuts down with the request still waiting.
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request did not return")
+	}
+	f.requirePending(t, rec, model.ImageID(url, 200, 0))
+}
+
 func TestSyncRedisDown(t *testing.T) {
 	f := newFixture(t)
 	url := "https://example.com/a.jpg"
