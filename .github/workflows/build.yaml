@@ -15,6 +15,16 @@ jobs:
   build-and-test:
     name: Build and test
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8.10.3-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       -
         name: Checkout code
@@ -30,6 +40,8 @@ jobs:
       -
         name: Run tests
         run: make test
+        env:
+          SVC_TEST_REDIS_ADDR: localhost:6379
       -
         name: Run build
         run: make build

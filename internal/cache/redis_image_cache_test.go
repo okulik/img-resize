@@ -12,7 +12,7 @@ import (
 
 func TestRedisImageCacheGet(t *testing.T) {
 	db, mock := redismock.NewClientMock()
-	mock.ExpectGet("foo").SetVal("bar")
+	mock.ExpectGet("resize:image:foo").SetVal("bar")
 
 	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
 	if err != nil {
@@ -27,9 +27,9 @@ func TestRedisImageCacheGet(t *testing.T) {
 
 func TestRedisImageCacheAdd(t *testing.T) {
 	db, mock := redismock.NewClientMock()
-	mock.ExpectSet("foo", "bar", 0)
-	mock.ExpectGet("foo").SetVal("bar")
-	mock.ExpectGet("baz").RedisNil()
+	mock.ExpectSet("resize:image:foo", "bar", 0)
+	mock.ExpectGet("resize:image:foo").SetVal("bar")
+	mock.ExpectGet("resize:image:baz").RedisNil()
 
 	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
 	if err != nil {
@@ -50,8 +50,8 @@ func TestRedisImageCacheAdd(t *testing.T) {
 
 func TestRedisImageCacheAddWithTTL(t *testing.T) {
 	db, mock := redismock.NewClientMock()
-	mock.ExpectSet("foo", "bar", time.Millisecond)
-	mock.ExpectGet("foo").SetVal("bar")
+	mock.ExpectSet("resize:image:foo", "bar", time.Millisecond)
+	mock.ExpectGet("resize:image:foo").SetVal("bar")
 
 	cache, err := cache.NewRedisImageCache(db, buildSettings(time.Millisecond))
 	if err != nil {
@@ -65,9 +65,9 @@ func TestRedisImageCacheAddWithTTL(t *testing.T) {
 	}
 }
 
-func TestRedisImageCacheContains(t *testing.T) {
+func TestRedisImageCacheContainsUsesExists(t *testing.T) {
 	db, mock := redismock.NewClientMock()
-	mock.ExpectGet("foo").SetVal("bar")
+	mock.ExpectExists("resize:image:foo").SetVal(1)
 
 	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
 	if err != nil {
@@ -75,7 +75,21 @@ func TestRedisImageCacheContains(t *testing.T) {
 	}
 
 	if !cache.Contains(context.Background(), "foo") {
-		t.Error("get method returning unexpected value")
+		t.Error("contains method returning unexpected value")
+	}
+}
+
+func TestRedisImageCacheContainsMissing(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	mock.ExpectExists("resize:image:foo").SetVal(0)
+
+	cache, err := cache.NewRedisImageCache(db, buildSettings(0))
+	if err != nil {
+		t.Error("error allocating RedisImageCache")
+	}
+
+	if cache.Contains(context.Background(), "foo") {
+		t.Error("contains method returning true for missing key")
 	}
 }
 

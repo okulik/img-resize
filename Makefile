@@ -55,6 +55,19 @@ lint: tools ## Installs golang linter
 test: ## Runs tests
 	APP_ENV=$(APP_ENV) go test -race ./...
 
+.PHONY: test-redis
+test-redis: ## Runs tests against a throwaway Redis container on 127.0.0.1:16380
+	docker rm -f img-resize-test-redis > /dev/null 2>&1 || true
+	docker run -d --name img-resize-test-redis -p 127.0.0.1:16380:6379 redis:8.10.3-alpine > /dev/null
+	status=0; \
+	for i in $$(seq 1 50); do \
+		docker exec img-resize-test-redis redis-cli ping 2> /dev/null | grep -q PONG && break; \
+		sleep 0.2; \
+	done; \
+	SVC_TEST_REDIS_ADDR=127.0.0.1:16380 $(MAKE) test || status=$$?; \
+	docker rm -f img-resize-test-redis > /dev/null 2>&1; \
+	exit $$status
+
 .PHONY: test-coverage
 test-coverage: ## Runs tests with coverage
 	APP_ENV=$(APP_ENV) go test -race -cover ./...
