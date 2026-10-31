@@ -156,7 +156,9 @@ func (r *Resizer) processImageResize(ctx context.Context, url string, width uint
 	}
 
 	log.Print("caching ", imageID)
-	r.imageCache.Add(ctx, imageID, data)
+	if !r.imageCache.Add(ctx, imageID, data) {
+		return model.ResizeResponse{Result: statusFailure}, fmt.Errorf("failed to cache %s", imageID)
+	}
 
 	return model.ResizeResponse{ID: imageID, Result: statusSuccess, Cached: false}, nil
 }

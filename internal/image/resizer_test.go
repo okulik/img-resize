@@ -73,6 +73,34 @@ func TestProcessReturnsResultForEveryURL(t *testing.T) {
 	}
 }
 
+func TestProcessReportsFailureWhenCacheWriteFails(t *testing.T) {
+	source := serveImage(t, buildJPEG(t, 64, 64))
+	resizer := image.NewResizer(buildSettings(), rejectingCache{})
+
+	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("unexpected number of results: %v", len(results))
+	}
+
+	if results[0].Result != "failure" {
+		t.Errorf("unexpected result: %v", results[0].Result)
+	}
+
+	if results[0].ID != "" {
+		t.Errorf("unexpected id for an image that was not stored: %v", results[0].ID)
+	}
+}
+
+type rejectingCache struct{}
+
+func (rejectingCache) Get(context.Context, string) ([]byte, bool) { return nil, false }
+func (rejectingCache) Contains(context.Context, string) bool      { return false }
+func (rejectingCache) Add(context.Context, string, any) bool      { return false }
+
 func buildSettings() *settings.Settings {
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{

@@ -37,5 +37,8 @@ func (cache *LRUImageCache) Contains(_ context.Context, key string) bool {
 }
 
 func (cache *LRUImageCache) Add(_ context.Context, key string, value any) bool {
-	return cache.Cache.Add(key, value)
+	// The underlying Add reports evictions, not whether the value was stored.
+	cache.Cache.Add(key, value)
+
+	return true
 }

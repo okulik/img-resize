@@ -47,6 +47,21 @@ func TestLRUImageCacheAdd(t *testing.T) {
 	}
 }
 
+func TestLRUImageCacheAddReportsStored(t *testing.T) {
+	cache, err := cache.NewLRUImageCache(1)
+	if err != nil {
+		t.Error("error allocating LRUImageCache")
+	}
+
+	if !cache.Add(context.Background(), "foo", []byte("1")) {
+		t.Error("add method not reporting a stored value")
+	}
+
+	if !cache.Add(context.Background(), "bar", []byte("2")) {
+		t.Error("add method not reporting a stored value that evicted another")
+	}
+}
+
 func TestLRUImageCacheContains(t *testing.T) {
 	cache, err := cache.NewLRUImageCache(100)
 	if err != nil {
