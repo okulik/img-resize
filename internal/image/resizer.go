@@ -198,6 +198,17 @@ func (r *Resizer) fetch(ctx context.Context, url string) ([]byte, error) {
 }
 
 func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
+	// read the image size from its header, as decoding allocates memory for all
+	// of the pixels and a small file can declare a very large image
+	config, err := jpeg.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode jpeg config: %v", err)
+	}
+
+	if int64(config.Width)*int64(config.Height) > r.settings.Service.MaxImagePixels {
+		return nil, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height)
+	}
+
 	// decode jpeg into image.Image
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {

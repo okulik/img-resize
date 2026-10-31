@@ -15,6 +15,7 @@ type ServiceSettings struct {
 	ImageResizeTimeout time.Duration `envconfig:"SVC_IMG_RESIZE_TIMEOUT" default:"5s"`
 	MaxImageSize       int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
 	MaxImageDimension  uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
+	MaxImagePixels     int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
 	RedisHost          string        `envconfig:"SVC_REDIS_HOST" default:"0.0.0.0"`
 	RedisPort          int           `envconfig:"SVC_REDIS_PORT" default:"6379"`
 }

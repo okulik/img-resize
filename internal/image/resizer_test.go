@@ -95,6 +95,35 @@ func TestProcessReportsFailureWhenCacheWriteFails(t *testing.T) {
 	}
 }
 
+func TestProcessSourcePixelLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxPixels int64
+		want      string
+	}{
+		{"at limit", 4096, "success"},
+		{"above limit", 4095, "failure"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, buildJPEG(t, 64, 64))
+			settings := buildSettings()
+			settings.Service.MaxImagePixels = test.maxPixels
+			resizer := image.NewResizer(settings, buildCache(t))
+
+			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+
+			if len(results) != 1 || results[0].Result != test.want {
+				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			}
+		})
+	}
+}
+
 type rejectingCache struct{}
 
 func (rejectingCache) Get(context.Context, string) ([]byte, bool) { return nil, false }
@@ -107,6 +136,7 @@ func buildSettings() *settings.Settings {
 			AsyncResize:        true,
 			ImageResizeTimeout: time.Second,
 			MaxImageSize:       1024 * 1024,
+			MaxImagePixels:     1024 * 1024,
 		},
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{ClientReadTimeout: time.Second},
