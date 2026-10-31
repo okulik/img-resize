@@ -21,7 +21,7 @@ func TestFetchBlocksInternalAddress(t *testing.T) {
 	}))
 	t.Cleanup(source.Close)
 
-	resizer := NewResizer(buildFetchSettings(false), nil)
+	resizer := NewResizer(buildFetchSettings(false))
 
 	_, err := resizer.fetch(context.Background(), source.URL)
 	if !errors.Is(err, errInternalAddress) {
@@ -39,7 +39,7 @@ func TestFetchAllowsInternalAddressWhenConfigured(t *testing.T) {
 	}))
 	t.Cleanup(source.Close)
 
-	resizer := NewResizer(buildFetchSettings(true), nil)
+	resizer := NewResizer(buildFetchSettings(true))
 
 	data, err := resizer.fetch(context.Background(), source.URL)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestFetchBlocksRedirectToInternalAddress(t *testing.T) {
 	}))
 	t.Cleanup(internal.Close)
 
-	resizer := NewResizer(buildFetchSettings(false), nil)
+	resizer := NewResizer(buildFetchSettings(false))
 	// Answers for a public host without dialing, so that the redirect target
 	// is the first address that goes through the real transport.
 	resizer.httpClient.Transport = redirectingTransport{
@@ -77,7 +77,7 @@ func TestFetchBlocksRedirectToInternalAddress(t *testing.T) {
 }
 
 func TestFetchRejectsUnsupportedScheme(t *testing.T) {
-	resizer := NewResizer(buildFetchSettings(false), nil)
+	resizer := NewResizer(buildFetchSettings(false))
 
 	for _, url := range []string{"file:///etc/passwd", "ftp://example.com/a.jpg", "gopher://example.com/"} {
 		if _, err := resizer.fetch(context.Background(), url); err == nil {

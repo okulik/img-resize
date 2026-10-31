@@ -7,13 +7,14 @@ import (
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/okulik/img-resize/internal/cache"
-	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/service"
 	"github.com/okulik/img-resize/internal/settings"
+	"github.com/okulik/img-resize/internal/testredis"
 )
 
 func TestRouterWithResizeEndpoint(t *testing.T) {
-	router := buildRouter()
+	router := buildRouter(t)
 	router.Post("/v1/resize", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -28,7 +29,7 @@ func TestRouterWithResizeEndpoint(t *testing.T) {
 }
 
 func TestRouterWithImageEndpoint(t *testing.T) {
-	router := buildRouter()
+	router := buildRouter(t)
 	router.Get("/v1/image/{imageID}", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -43,7 +44,7 @@ func TestRouterWithImageEndpoint(t *testing.T) {
 }
 
 func TestRouterWithMissingEndpoint(t *testing.T) {
-	router := buildRouter()
+	router := buildRouter(t)
 	router.Post("/v1/resize", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -58,7 +59,7 @@ func TestRouterWithMissingEndpoint(t *testing.T) {
 }
 
 func TestRouterWithHealthEndpoint(t *testing.T) {
-	router := buildRouter()
+	router := buildRouter(t)
 	router.Get("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -72,10 +73,11 @@ func TestRouterWithHealthEndpoint(t *testing.T) {
 	}
 }
 
-func buildRouter() *chi.Mux {
+func buildRouter(t *testing.T) *chi.Mux {
+	t.Helper()
+	client := testredis.Client(t, 6)
 	settings, _ := settings.Load()
 	cache, _ := cache.NewLRUImageCache(1)
-	resizer := image.NewResizer(settings, cache)
 
-	return service.NewRouter(settings, cache, resizer)
+	return service.NewRouter(settings, cache, queue.New(client, settings))
 }

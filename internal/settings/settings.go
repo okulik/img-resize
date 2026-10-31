@@ -11,8 +11,6 @@ import (
 type ServiceSettings struct {
 	ImageCacheSize          int           `envconfig:"SVC_IMG_CACHE_SIZE" default:"1024"`
 	ImageCacheTTL           time.Duration `envconfig:"SVC_IMG_CACHE_TTL" default:"1h"`
-	AsyncResize             bool          `envconfig:"SVC_ASYNC_RESIZE" default:"true"`
-	ImageResizeTimeout      time.Duration `envconfig:"SVC_IMG_RESIZE_TIMEOUT" default:"5s"`
 	MaxImageSize            int64         `envconfig:"SVC_MAX_IMG_SIZE" default:"15728640"`
 	MaxImageDimension       uint          `envconfig:"SVC_MAX_IMG_DIMENSION" default:"4096"`
 	MaxImagePixels          int64         `envconfig:"SVC_MAX_IMG_PIXELS" default:"50000000"`
@@ -26,6 +24,7 @@ type ServiceSettings struct {
 	JobReclaimInterval      time.Duration `envconfig:"SVC_JOB_RECLAIM_INTERVAL" default:"15s"`
 	WorkerConcurrency       int           `envconfig:"SVC_WORKER_CONCURRENCY" default:"1"`
 	JobMaxAttempts          int64         `envconfig:"SVC_JOB_MAX_ATTEMPTS" default:"3"`
+	MaxQueueDepth           int64         `envconfig:"SVC_MAX_QUEUE_DEPTH" default:"10000"`
 	AllowInternalURLs       bool          `envconfig:"SVC_ALLOW_INTERNAL_URLS" default:"false"`
 }
 

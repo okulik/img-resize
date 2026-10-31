@@ -11,99 +11,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
-	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/settings"
 )
 
-func TestProcessReturnsSuccessfulResult(t *testing.T) {
-	source := serveImage(t, buildJPEG(t, 64, 64))
-	imageCache := buildCache(t)
-	resizer := image.NewResizer(buildSettings(), imageCache)
-
-	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("unexpected number of results: %v", len(results))
-	}
-
-	if results[0].Result != "success" {
-		t.Errorf("unexpected result: %v", results[0].Result)
-	}
-
-	data, ok := imageCache.Get(context.Background(), results[0].ID)
-	if !ok {
-		t.Fatalf("returned id %q is not cached", results[0].ID)
-	}
-
-	img, err := jpeg.Decode(bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("cached image is not a jpeg: %v", err)
-	}
-
-	if img.Bounds().Dx() != 32 || img.Bounds().Dy() != 32 {
-		t.Errorf("unexpected image size: %v", img.Bounds())
-	}
-}
-
-func TestProcessReturnsResultForEveryURL(t *testing.T) {
-	source := serveImage(t, buildJPEG(t, 64, 64))
-	missing := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(missing.Close)
-	resizer := image.NewResizer(buildSettings(), buildCache(t))
-
-	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL, missing.URL}, Width: 32}, context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error %v", err)
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("unexpected number of results: %v", len(results))
-	}
-
-	if results[0].Result != "success" {
-		t.Errorf("unexpected result for first url: %v", results[0].Result)
-	}
-
-	if results[1].Result != "failure" {
-		t.Errorf("unexpected result for second url: %v", results[1].Result)
-	}
-}
-
-func TestProcessReportsFailureWhenCacheWriteFails(t *testing.T) {
-	source := serveImage(t, buildJPEG(t, 64, 64))
-	resizer := image.NewResizer(buildSettings(), rejectingCache{})
-
-	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("unexpected number of results: %v", len(results))
-	}
-
-	if results[0].Result != "failure" {
-		t.Errorf("unexpected result: %v", results[0].Result)
-	}
-
-	if results[0].ID != "" {
-		t.Errorf("unexpected id for an image that was not stored: %v", results[0].ID)
-	}
-}
-
-func TestProcessSourcePixelLimit(t *testing.T) {
+func TestResizeSourcePixelLimit(t *testing.T) {
 	tests := []struct {
 		name      string
 		maxPixels int64
-		want      string
+		wantErr   bool
 	}{
-		{"at limit", 4096, "success"},
-		{"above limit", 4095, "failure"},
+		{"at limit", 4096, false},
+		{"above limit", 4095, true},
 	}
 
 	for _, test := range tests {
@@ -111,31 +30,27 @@ func TestProcessSourcePixelLimit(t *testing.T) {
 			source := serveImage(t, buildJPEG(t, 64, 64))
 			settings := buildSettings()
 			settings.Service.MaxImagePixels = test.maxPixels
-			resizer := image.NewResizer(settings, buildCache(t))
 
-			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-			if err != nil {
-				t.Fatalf("unexpected error %v", err)
-			}
+			_, err := image.NewResizer(settings).Resize(context.Background(), source.URL, 32, 0)
 
-			if len(results) != 1 || results[0].Result != test.want {
-				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			if (err != nil) != test.wantErr {
+				t.Errorf("unexpected error: got %v want error %v", err, test.wantErr)
 			}
 		})
 	}
 }
 
-func TestProcessSourceDimensionLimit(t *testing.T) {
+func TestResizeSourceDimensionLimit(t *testing.T) {
 	tests := []struct {
 		name         string
 		sourceWidth  int
 		sourceHeight int
-		want         string
+		wantErr      bool
 	}{
-		{"wide at limit", 100, 10, "success"},
-		{"tall at limit", 10, 100, "success"},
-		{"wide above limit", 101, 10, "failure"},
-		{"tall above limit", 10, 101, "failure"},
+		{"wide at limit", 100, 10, false},
+		{"tall at limit", 10, 100, false},
+		{"wide above limit", 101, 10, true},
+		{"tall above limit", 10, 101, true},
 	}
 
 	for _, test := range tests {
@@ -143,35 +58,31 @@ func TestProcessSourceDimensionLimit(t *testing.T) {
 			source := serveImage(t, buildJPEG(t, test.sourceWidth, test.sourceHeight))
 			settings := buildSettings()
 			settings.Service.MaxImageSourceDimension = 100
-			resizer := image.NewResizer(settings, buildCache(t))
 
-			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-			if err != nil {
-				t.Fatalf("unexpected error %v", err)
-			}
+			_, err := image.NewResizer(settings).Resize(context.Background(), source.URL, 32, 0)
 
-			if len(results) != 1 || results[0].Result != test.want {
-				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			if (err != nil) != test.wantErr {
+				t.Errorf("unexpected error: got %v want error %v", err, test.wantErr)
 			}
 		})
 	}
 }
 
-func TestProcessOutputDimensionLimit(t *testing.T) {
+func TestResizeOutputDimensionLimit(t *testing.T) {
 	tests := []struct {
 		name          string
 		sourceWidth   int
 		sourceHeight  int
 		width, height uint
-		want          string
+		wantErr       bool
 	}{
-		{"derived height at limit", 10, 1000, 1, 0, "success"},
-		{"derived height above limit", 10, 1000, 2, 0, "failure"},
-		{"derived width at limit", 1000, 10, 0, 1, "success"},
-		{"derived width above limit", 1000, 10, 0, 2, "failure"},
-		{"explicit size ignores aspect ratio", 10, 1000, 50, 50, "success"},
-		{"unscaled source at limit", 100, 100, 0, 0, "success"},
-		{"unscaled source above limit", 101, 100, 0, 0, "failure"},
+		{"derived height at limit", 10, 1000, 1, 0, false},
+		{"derived height above limit", 10, 1000, 2, 0, true},
+		{"derived width at limit", 1000, 10, 0, 1, false},
+		{"derived width above limit", 1000, 10, 0, 2, true},
+		{"explicit size ignores aspect ratio", 10, 1000, 50, 50, false},
+		{"unscaled source at limit", 100, 100, 0, 0, false},
+		{"unscaled source above limit", 101, 100, 0, 0, true},
 	}
 
 	for _, test := range tests {
@@ -179,21 +90,17 @@ func TestProcessOutputDimensionLimit(t *testing.T) {
 			source := serveImage(t, buildJPEG(t, test.sourceWidth, test.sourceHeight))
 			settings := buildSettings()
 			settings.Service.MaxImageDimension = 100
-			resizer := image.NewResizer(settings, buildCache(t))
 
-			results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: test.width, Height: test.height}, context.Background())
-			if err != nil {
-				t.Fatalf("unexpected error %v", err)
-			}
+			_, err := image.NewResizer(settings).Resize(context.Background(), source.URL, test.width, test.height)
 
-			if len(results) != 1 || results[0].Result != test.want {
-				t.Errorf("unexpected results: got %+v want %v", results, test.want)
+			if (err != nil) != test.wantErr {
+				t.Errorf("unexpected error: got %v want error %v", err, test.wantErr)
 			}
 		})
 	}
 }
 
-func TestProcessRejectsImageWithZeroHeight(t *testing.T) {
+func TestResizeRejectsImageWithZeroHeight(t *testing.T) {
 	data := buildJPEG(t, 64, 64)
 	frameHeader := bytes.Index(data, []byte{0xff, 0xc0})
 	if frameHeader < 0 {
@@ -202,43 +109,12 @@ func TestProcessRejectsImageWithZeroHeight(t *testing.T) {
 	data[frameHeader+5], data[frameHeader+6] = 0, 0
 
 	source := serveImage(t, data)
-	resizer := image.NewResizer(buildSettings(), buildCache(t))
 
-	results, err := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error %v", err)
-	}
+	_, err := image.NewResizer(buildSettings()).Resize(context.Background(), source.URL, 32, 0)
 
-	if len(results) != 1 || results[0].Result != "failure" {
-		t.Errorf("unexpected results: %+v", results)
-	}
-}
-
-func TestProcessFailsWhenSourceStopsResponding(t *testing.T) {
-	release := make(chan struct{})
-	source := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		<-release
-	}))
-	t.Cleanup(source.Close)
-	defer close(release)
-
-	settings := buildSettings()
-	settings.Http.ClientReadTimeout = 50 * time.Millisecond
-	resizer := image.NewResizer(settings, buildCache(t))
-
-	done := make(chan []model.ResizeResponse, 1)
-	go func() {
-		results, _ := resizer.Process(&model.ResizeRequest{URLs: []string{source.URL}, Width: 32}, context.Background())
-		done <- results
-	}()
-
-	select {
-	case results := <-done:
-		if len(results) != 1 || results[0].Result != "failure" {
-			t.Errorf("unexpected results: %+v", results)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("fetch did not time out")
+	var failure *image.Failure
+	if !errors.As(err, &failure) || failure.Reason != image.ReasonInvalid {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -346,7 +222,7 @@ func TestResizeClassifiesFailures(t *testing.T) {
 			if width == 0 {
 				width = 32
 			}
-			resizer := image.NewResizer(settings, buildCache(t))
+			resizer := image.NewResizer(settings)
 
 			data, err := resizer.Resize(ctx, test.source(t), width, 0)
 
@@ -364,7 +240,7 @@ func TestResizeClassifiesFailures(t *testing.T) {
 
 func TestResizeReturnsResizedImage(t *testing.T) {
 	source := serveImage(t, buildJPEG(t, 64, 64))
-	resizer := image.NewResizer(buildSettings(), buildCache(t))
+	resizer := image.NewResizer(buildSettings())
 
 	data, err := resizer.Resize(context.Background(), source.URL, 32, 0)
 	if err != nil {
@@ -380,17 +256,9 @@ func TestResizeReturnsResizedImage(t *testing.T) {
 	}
 }
 
-type rejectingCache struct{}
-
-func (rejectingCache) Get(context.Context, string) ([]byte, bool) { return nil, false }
-func (rejectingCache) Contains(context.Context, string) bool      { return false }
-func (rejectingCache) Add(context.Context, string, any) bool      { return false }
-
 func buildSettings() *settings.Settings {
 	return &settings.Settings{
 		Service: &settings.ServiceSettings{
-			AsyncResize:             true,
-			ImageResizeTimeout:      time.Second,
 			MaxImageSize:            1024 * 1024,
 			MaxImagePixels:          1024 * 1024,
 			MaxImageDimension:       1024,
@@ -400,16 +268,6 @@ func buildSettings() *settings.Settings {
 		Auth: &settings.AuthSettings{},
 		Http: &settings.HttpSettings{ClientReadTimeout: time.Second},
 	}
-}
-
-func buildCache(t *testing.T) cache.ImageCacheAdapter {
-	t.Helper()
-	imageCache, err := cache.NewLRUImageCache(16)
-	if err != nil {
-		t.Fatalf("unexpected error %v", err)
-	}
-
-	return imageCache
 }
 
 func buildJPEG(t *testing.T, width int, height int) []byte {

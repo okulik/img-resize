@@ -635,7 +635,7 @@ func newFixture(t *testing.T, claimIdle time.Duration, tweaks ...func(*settings.
 		settings: s,
 		queue:    queue.New(client, s),
 		cache:    imageCache,
-		resizer:  image.NewResizer(s, nil),
+		resizer:  image.NewResizer(s),
 	}
 }
 

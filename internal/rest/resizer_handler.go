@@ -1,15 +1,17 @@
 package rest
 
 import (
+	"context"
 	"io"
+	"log"
 	"net/http"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/pkg/errors"
 
 	"github.com/okulik/img-resize/internal/cache"
-	"github.com/okulik/img-resize/internal/image"
 	"github.com/okulik/img-resize/internal/model"
+	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/settings"
 	"github.com/okulik/img-resize/internal/web"
 )
@@ -17,27 +19,32 @@ import (
 const (
 	maxRequestSize     = 8 * 1024
 	maxBatchImageCount = 100
+	retryAfterSeconds  = "5"
+
+	statusSuccess  = "success"
+	statusFailure  = "failure"
+	statusEnqueued = "enqueued"
 )
 
 type ResizerHandler struct {
 	settings   *settings.Settings
 	imageCache cache.ImageCacheAdapter
-	resizer    image.ImageResizer
+	queue      *queue.Queue
 }
 
 // Creates a new instance of ResizerHandler object.
-func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer image.ImageResizer) *ResizerHandler {
+func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue) *ResizerHandler {
 	return &ResizerHandler{
 		settings:   settings,
 		imageCache: imageCache,
-		resizer:    resizer,
+		queue:      queue,
 	}
 }
 
-// A web handler for resizing images. Depending on the "async" query parameter, images
-// are resized either synchronously (the image is resized before the handler returns
-// to the caller) or asynchronously (the resizing job is enqueued for processing by a
-// fleet of background workers). The resized images are stored to an in-memory cache.
+// A web handler for resizing images. Each image is enqueued as a job for a fleet
+// of background workers, and the resized images are stored to the image cache.
+// The response lists a result with the image ID for every URL, which a client
+// uses to retrieve the image once it's resized.
 func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	// Limit POST body size to up to maxRequestSize bytes
 	buffer, err := io.ReadAll(io.LimitReader(r.Body, maxRequestSize))
@@ -65,35 +72,65 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isAsyncResize(r) {
-		if !rh.settings.Service.AsyncResize {
-			web.WriteErrorResponse(w, errors.New("async resize is disabled"), http.StatusFailedDependency)
+	// Refuse the request while the queue is full. The depth is read once, so a
+	// batch may overshoot the limit by up to maxBatchImageCount jobs.
+	depth, err := rh.queue.Depth(r.Context())
+	if err != nil {
+		rh.writeUnavailable(w, err)
+		return
+	}
+	if depth >= rh.settings.Service.MaxQueueDepth {
+		log.Printf("job queue full at %d jobs, rejecting request", depth)
+		rh.writeUnavailable(w, nil)
+		return
+	}
+
+	results := make([]model.ResizeResponse, 0, len(resizeReq.URLs))
+	for _, url := range resizeReq.URLs {
+		result, err := rh.submit(r.Context(), url, resizeReq.Width, resizeReq.Height)
+		if err != nil {
+			rh.writeUnavailable(w, err)
 			return
 		}
-		resp := rh.resizer.ProcessAsync(resizeReq)
-		web.WriteJSONResponse(w, resp, http.StatusOK)
-		return
+		results = append(results, result)
 	}
 
-	resp, err := rh.resizer.Process(resizeReq, r.Context())
-	if err != nil {
-		web.WriteErrorResponse(w, errors.Wrap(err, "failed to resize images"), http.StatusInternalServerError)
-		return
-	}
-	web.WriteJSONResponse(w, resp, http.StatusCreated)
+	web.WriteJSONResponse(w, results, http.StatusOK)
 }
 
-// A web handler for retrieving resized images from the in-memory cache.
+// Reports the outcome of a resize of one image, enqueueing a job unless the
+// image is cached or its job already exists.
+func (rh *ResizerHandler) submit(ctx context.Context, url string, width uint, height uint) (model.ResizeResponse, error) {
+	id := model.ImageID(url, width, height)
+	if rh.imageCache.Contains(ctx, id) {
+		return model.ResizeResponse{Result: statusSuccess, ID: id, Cached: true}, nil
+	}
+
+	submission, err := rh.queue.Submit(ctx, model.Job{ID: id, URL: url, Width: width, Height: height})
+	if err != nil {
+		return model.ResizeResponse{}, err
+	}
+	if submission == queue.Failed {
+		return model.ResizeResponse{Result: statusFailure, ID: id}, nil
+	}
+
+	return model.ResizeResponse{Result: statusEnqueued, ID: id}, nil
+}
+
+// Answers 503 with generic text, as an error from Redis holds detail clients
+// must not see. A nil err means the queue is full.
+func (rh *ResizerHandler) writeUnavailable(w http.ResponseWriter, err error) {
+	if err != nil {
+		log.Printf("resize request failed: %v", err)
+	}
+	w.Header().Set("Retry-After", retryAfterSeconds)
+	web.WriteErrorResponse(w, errors.New("service unavailable"), http.StatusServiceUnavailable)
+}
+
+// A web handler for retrieving resized images from the image cache.
 func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 	imageID := chi.URLParam(r, "imageID")
 
-	// If image is being resized, perform a blocking call (with a timeout)
-	if !rh.resizer.ResizingProgress().WaitForResizingDone(imageID) {
-		web.WriteErrorResponse(w, errors.New("image resize timeout"), http.StatusNotFound)
-		return
-	}
-
-	// Check if the image was cached
 	data, ok := rh.imageCache.Get(r.Context(), imageID)
 	if ok {
 		writeImageResponse(w, data)
@@ -101,11 +138,6 @@ func (rh *ResizerHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.WriteErrorResponse(w, errors.New("image not cached"), http.StatusNotFound)
-}
-
-func isAsyncResize(r *http.Request) bool {
-	async := r.URL.Query().Get("async")
-	return async == "true" || async == "1"
 }
 
 func writeImageResponse(w http.ResponseWriter, data []byte) {

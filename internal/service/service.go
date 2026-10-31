@@ -13,21 +13,21 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/okulik/img-resize/internal/cache"
-	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/settings"
 )
 
 type Service struct {
 	settings   *settings.Settings
 	imageCache cache.ImageCacheAdapter
-	resizer    *image.Resizer
+	queue      *queue.Queue
 }
 
-func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, resizer *image.Resizer) *Service {
+func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue) *Service {
 	return &Service{
 		settings:   settings,
 		imageCache: imageCache,
-		resizer:    resizer,
+		queue:      queue,
 	}
 }
 
@@ -52,7 +52,7 @@ func (svc *Service) startHttpServer() (*http.Server, context.CancelFunc) {
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", svc.settings.Http.ServerPort),
-		Handler:      NewRouter(svc.settings, svc.imageCache, svc.resizer),
+		Handler:      NewRouter(svc.settings, svc.imageCache, svc.queue),
 		BaseContext:  func(_ net.Listener) context.Context { return baseCtx },
 		IdleTimeout:  svc.settings.Http.ServerIdleTimeout,
 		ReadTimeout:  svc.settings.Http.ServerReadTimeout,
@@ -82,7 +82,6 @@ func (svc *Service) handleSignals(server *http.Server) error {
 	gracefulCtx, gracefulCancel :=
 		context.WithTimeout(context.Background(), svc.settings.Http.ServerGracefulShutdownTimeout)
 	defer gracefulCancel()
-	defer svc.resizer.Shutdown()
 
 	if err := server.Shutdown(gracefulCtx); err != nil {
 		return err
