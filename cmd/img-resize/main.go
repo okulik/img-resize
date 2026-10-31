@@ -9,6 +9,7 @@ import (
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
@@ -41,14 +42,15 @@ func run() error {
 	}
 
 	jobs := queue.New(client, cfg)
+	m := metrics.New()
 
 	// Load accepts no other role.
 	if cfg.Service.Role == settings.RoleWorker {
-		w := worker.New(cfg, jobs, cache, image.NewResizer(cfg))
-		return worker.NewService(cfg, w).Start()
+		w := worker.New(cfg, jobs, cache, image.NewResizer(cfg), m)
+		return worker.NewService(cfg, w, m).Start()
 	}
 
 	limiter := ratelimit.New(client, time.Now)
 
-	return service.NewService(cfg, cache, jobs, limiter).Start()
+	return service.NewService(cfg, cache, jobs, limiter, m).Start()
 }

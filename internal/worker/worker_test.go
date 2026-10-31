@@ -18,10 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/settings"
@@ -131,6 +134,101 @@ func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
 	if n := f.depth(t); n != 0 {
 		t.Errorf("unexpected depth: %d", n)
 	}
+}
+
+func TestWorkerRecordsResults(t *testing.T) {
+	transient := func(_ int64, w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }
+	data := buildJPEG(t, 64, 64)
+	tests := []struct {
+		name    string
+		respond func(n int64, w http.ResponseWriter, r *http.Request)
+		cached  bool
+		// want counts jobs by result.
+		want map[string]float64
+		// resizes is how many times the worker resized.
+		resizes uint64
+	}{
+		{"success", func(_ int64, w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(data) }, false,
+			map[string]float64{"success": 1}, 1},
+		{"cached", nil, true, map[string]float64{"success": 1}, 0},
+		{"permanent failure", func(_ int64, w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }, false,
+			map[string]float64{"failure": 1}, 1},
+		{"retry", func(n int64, w http.ResponseWriter, _ *http.Request) {
+			if n == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write(data)
+		}, false, map[string]float64{"success": 1, "retried": 1}, 2},
+		{"abandoned", transient, false, map[string]float64{"retried": 2, "abandoned": 1}, 3},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t, shortIdle)
+			src := newSource(t, test.respond)
+			if test.cached {
+				src = imageSource(t)
+			}
+			job := f.submit(t, src.URL)
+			if test.cached && !f.cache.Add(context.Background(), job.ID, data) {
+				t.Fatal("seeding the cache failed")
+			}
+
+			f.start(t)
+
+			for _, result := range []string{"success", "failure", "retried", "abandoned"} {
+				want := test.want[result]
+				eventually(t, "the "+result+" count", func() bool {
+					return testutil.ToFloat64(f.metrics.Jobs.WithLabelValues(result)) == want
+				})
+			}
+			if got := histogramCount(t, f.metrics.JobDuration); got != test.resizes {
+				t.Errorf("unexpected resizes timed: got %d want %d", got, test.resizes)
+			}
+		})
+	}
+}
+
+func TestWorkerRecordsDuration(t *testing.T) {
+	f := newFixture(t, noRetry)
+	src := imageSource(t)
+	job := f.submit(t, src.URL)
+
+	f.start(t)
+
+	f.waitFinished(t, job)
+	if got := histogramCount(t, f.metrics.JobDuration); got != 1 {
+		t.Errorf("unexpected count: got %d want 1", got)
+	}
+}
+
+func TestWorkerRecordsStoredBytes(t *testing.T) {
+	f := newFixture(t, noRetry)
+	src := imageSource(t)
+	job := f.submit(t, src.URL)
+
+	f.start(t)
+
+	f.waitFinished(t, job)
+	data, ok, err := f.cache.Get(context.Background(), job.ID)
+	if err != nil || !ok {
+		t.Fatalf("reading the image: %v %v", ok, err)
+	}
+	if got := testutil.ToFloat64(f.metrics.Bandwidth.WithLabelValues("stored")); got != float64(len(data)) {
+		t.Errorf("unexpected stored bytes: got %v want %d", got, len(data))
+	}
+}
+
+func histogramCount(t *testing.T, h interface{ Write(*dto.Metric) error }) uint64 {
+	t.Helper()
+
+	var m dto.Metric
+	if err := h.Write(&m); err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	return m.GetHistogram().GetSampleCount()
 }
 
 func TestWorkerRecoversJobFromDeadConsumer(t *testing.T) {
@@ -619,6 +717,7 @@ type fixture struct {
 	queue    *queue.Queue
 	cache    cache.ImageCacheAdapter
 	resizer  *image.Resizer
+	metrics  *metrics.Metrics
 }
 
 func newFixture(t *testing.T, claimIdle time.Duration, tweaks ...func(*settings.ServiceSettings)) *fixture {
@@ -657,6 +756,7 @@ func newFixture(t *testing.T, claimIdle time.Duration, tweaks ...func(*settings.
 		queue:    queue.New(client, s),
 		cache:    imageCache,
 		resizer:  image.NewResizer(s),
+		metrics:  metrics.New(),
 	}
 }
 
@@ -795,7 +895,7 @@ type run struct {
 func (f *fixture) prepare(t *testing.T) *run {
 	t.Helper()
 
-	w := New(f.settings, f.queue, f.cache, f.resizer)
+	w := New(f.settings, f.queue, f.cache, f.resizer, f.metrics)
 	w.readBlock = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/settings"
 )
 
@@ -18,10 +19,11 @@ import (
 type Service struct {
 	settings *settings.Settings
 	worker   *Worker
+	metrics  *metrics.Metrics
 }
 
-func NewService(settings *settings.Settings, worker *Worker) *Service {
-	return &Service{settings: settings, worker: worker}
+func NewService(settings *settings.Settings, worker *Worker, metrics *metrics.Metrics) *Service {
+	return &Service{settings: settings, worker: worker, metrics: metrics}
 }
 
 // Start runs the worker until the process is told to stop. It then stops
@@ -51,6 +53,11 @@ func (svc *Service) Start() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		svc.metrics.Run(ctx, svc.settings.Service.MetricsPort)
+	}()
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- svc.worker.Run(ctx) }()
 
@@ -72,6 +79,7 @@ func (svc *Service) Start() error {
 	if !workerStopped {
 		failure = errors.Join(failure, <-workerDone)
 	}
+	<-metricsDone
 
 	if !serverStopped {
 		shutdownCtx, shutdownCancel :=

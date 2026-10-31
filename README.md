@@ -60,6 +60,7 @@ Besides `SVC_ROLE`, the queue and workers use these `SVC_*` settings:
 | `SVC_MAX_QUEUE_DEPTH` | `10000` | Queued jobs after which new ones are refused |
 | `SVC_SYNC_WAIT_TIMEOUT` | `15s` | How long `?sync=true` waits |
 | `SVC_ALLOW_INTERNAL_URLS` | `false` | Allow image URLs on private addresses |
+| `SVC_METRICS_PORT` | `9091` | Port of the Prometheus `/metrics` endpoint, served by both roles and not on the public port |
 
 ## A wish list
 

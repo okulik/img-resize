@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/settings"
@@ -23,14 +24,16 @@ type Service struct {
 	imageCache cache.ImageCacheAdapter
 	queue      *queue.Queue
 	limiter    *ratelimit.Limiter
+	metrics    *metrics.Metrics
 }
 
-func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter) *Service {
+func NewService(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter, metrics *metrics.Metrics) *Service {
 	return &Service{
 		settings:   settings,
 		imageCache: imageCache,
 		queue:      queue,
 		limiter:    limiter,
+		metrics:    metrics,
 	}
 }
 
@@ -53,6 +56,25 @@ func (svc *Service) Start() error {
 		<-listenDone
 	}()
 
+	// Metrics run on a port of their own, which is not public. They stop after
+	// the server, so a scrape can see the shutdown.
+	metricsCtx, stopMetrics := context.WithCancel(context.Background())
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		svc.metrics.Run(metricsCtx, svc.settings.Service.MetricsPort)
+	}()
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		svc.metrics.SampleQueueDepth(metricsCtx, svc.queue.Depth)
+	}()
+	defer func() {
+		stopMetrics()
+		<-metricsDone
+		<-samplerDone
+	}()
+
 	if err := svc.handleSignals(server); err != nil {
 		return errors.Wrap(err, "error shutting down server")
 	}
@@ -68,7 +90,7 @@ func (svc *Service) startHttpServer() (*http.Server, context.CancelFunc) {
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", svc.settings.Http.ServerPort),
-		Handler:      NewRouter(svc.settings, svc.imageCache, svc.queue, svc.limiter),
+		Handler:      NewRouter(svc.settings, svc.imageCache, svc.queue, svc.limiter, svc.metrics),
 		BaseContext:  func(_ net.Listener) context.Context { return baseCtx },
 		IdleTimeout:  svc.settings.Http.ServerIdleTimeout,
 		ReadTimeout:  svc.settings.Http.ServerReadTimeout,

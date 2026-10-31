@@ -16,10 +16,12 @@ import (
 	"time"
 
 	chi "github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
@@ -247,7 +249,7 @@ func TestGetImageUnknown(t *testing.T) {
 func TestGetImageFinishingBetweenReads(t *testing.T) {
 	f := newFixture(t)
 	// The worker stores the image and drops the job state after the first read.
-	f.handler = rest.NewResizerHandler(f.settings, &missesFirstGet{ImageCacheAdapter: f.cache}, f.queue, f.limiter)
+	f.handler = rest.NewResizerHandler(f.settings, &missesFirstGet{ImageCacheAdapter: f.cache}, f.queue, f.limiter, f.metrics)
 	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
 
 	rec := f.get("/v1/image/abc")
@@ -276,7 +278,7 @@ func TestGetImageRedisDown(t *testing.T) {
 func TestResizeRedisDown(t *testing.T) {
 	f := newFixture(t)
 	// Depth is read first, so only a failing cache check can fail the request.
-	f.handler = rest.NewResizerHandler(f.settings, failingCache{f.cache}, f.queue, f.limiter)
+	f.handler = rest.NewResizerHandler(f.settings, failingCache{f.cache}, f.queue, f.limiter, f.metrics)
 
 	rec := f.resize(t, "/v1/resize", `{"urls":["https://example.com/a.jpg"],"width":200}`)
 
@@ -499,7 +501,7 @@ func TestGetImageThrottledByBytes(t *testing.T) {
 func TestGetImageByteThrottleRedisDown(t *testing.T) {
 	f := newFixture(t)
 	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
-	f.handler = rest.NewResizerHandler(f.settings, f.cache, f.queue, ratelimit.New(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}), time.Now))
+	f.handler = rest.NewResizerHandler(f.settings, f.cache, f.queue, ratelimit.New(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}), time.Now), f.metrics)
 
 	rec := f.get("/v1/image/abc")
 
@@ -657,6 +659,7 @@ type fixture struct {
 	queue    *queue.Queue
 	limiter  *ratelimit.Limiter
 	handler  *rest.ResizerHandler
+	metrics  *metrics.Metrics
 }
 
 func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixture {
@@ -702,7 +705,9 @@ func newFixture(t *testing.T, tweaks ...func(*settings.ServiceSettings)) *fixtur
 
 	limiter := ratelimit.New(client, time.Now)
 
-	return &fixture{settings: s, client: client, cache: imageCache, queue: q, limiter: limiter, handler: rest.NewResizerHandler(s, imageCache, q, limiter)}
+	m := metrics.New()
+
+	return &fixture{settings: s, client: client, cache: imageCache, queue: q, limiter: limiter, metrics: m, handler: rest.NewResizerHandler(s, imageCache, q, limiter, m)}
 }
 
 // listen runs the queue's listener until the test ends.
@@ -726,7 +731,7 @@ func (f *fixture) startWorker(t *testing.T) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	w := worker.New(f.settings, f.queue, f.cache, image.NewResizer(f.settings))
+	w := worker.New(f.settings, f.queue, f.cache, image.NewResizer(f.settings), f.metrics)
 	go func() { _ = w.Run(ctx) }()
 	// A worker in a blocked read stops only when the read ends, which closing
 	// the client does, so the test does not wait for it.
@@ -833,4 +838,60 @@ func (c *missesFirstGet) Get(ctx context.Context, key string) ([]byte, bool, err
 	}
 
 	return c.ImageCacheAdapter.Get(ctx, key)
+}
+
+func TestHandlerRecordsThrottling(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) {
+		s.RateLimitPerMinute = 1
+		s.RateLimitBytesPerMinute = 6
+	})
+	f.cache.Add(context.Background(), "abc", []byte("jpeg"))
+	f.resize(t, "/v1/resize", `{"urls":["https://example.com/a.jpg"],"width":200}`)
+	if rec := f.resize(t, "/v1/resize", `{"urls":["https://example.com/b.jpg"],"width":200}`); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	f.get("/v1/image/abc")
+	if rec := f.get("/v1/image/abc"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+
+	for limit, want := range map[string]float64{"requests": 1, "bytes": 1} {
+		if got := testutil.ToFloat64(f.metrics.Throttled.WithLabelValues(limit)); got != want {
+			t.Errorf("unexpected throttled count for %s: got %v want %v", limit, got, want)
+		}
+	}
+}
+
+func TestHandlerRecordsQueueFull(t *testing.T) {
+	f := newFixture(t, func(s *settings.ServiceSettings) { s.MaxQueueDepth = 1 })
+	f.resize(t, "/v1/resize", `{"urls":["https://example.com/a.jpg"],"width":200}`)
+	if rec := f.resize(t, "/v1/resize", `{"urls":["https://example.com/b.jpg"],"width":200}`); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+
+	if got := testutil.ToFloat64(f.metrics.Rejected.WithLabelValues("queue_full")); got != 1 {
+		t.Errorf("unexpected rejected count: got %v want 1", got)
+	}
+}
+
+func TestRecordsBandwidth(t *testing.T) {
+	f := newFixture(t)
+	f.startWorker(t)
+	f.listen(t)
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = jpeg.Encode(w, stdimage.NewRGBA(stdimage.Rect(0, 0, 64, 64)), nil)
+	}))
+	t.Cleanup(src.Close)
+
+	rec := f.resize(t, "/v1/resize?sync=true", fmt.Sprintf(`{"urls":[%q],"width":32}`, src.URL))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %v", rec.Code)
+	}
+	size := float64(rec.Body.Len())
+	for _, direction := range []string{"stored", "served"} {
+		if got := testutil.ToFloat64(f.metrics.Bandwidth.WithLabelValues(direction)); got != size {
+			t.Errorf("unexpected %s bytes: got %v want %v", direction, got, size)
+		}
+	}
 }

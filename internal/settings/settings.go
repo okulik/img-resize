@@ -38,6 +38,7 @@ type ServiceSettings struct {
 	RateLimitIPv4Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV4_PREFIX" default:"32"`
 	RateLimitIPv6Prefix     int           `envconfig:"SVC_RATE_LIMIT_IPV6_PREFIX" default:"64"`
 	TrustFlyClientIP        bool          `envconfig:"SVC_TRUST_FLY_CLIENT_IP" default:"false"`
+	MetricsPort             uint          `envconfig:"SVC_METRICS_PORT" default:"9091"`
 }
 
 type HttpSettings struct {

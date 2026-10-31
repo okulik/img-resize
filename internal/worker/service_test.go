@@ -47,6 +47,29 @@ func TestWorkerServiceHealth(t *testing.T) {
 	stopWorkerService(t, done)
 }
 
+func TestWorkerServiceServesMetrics(t *testing.T) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+
+	f := newFixture(t, noRetry)
+	f.settings.Http = httpSettings(freePort(t))
+	done := startWorkerService(t, f)
+
+	var addr string
+	eventually(t, "the metrics listener", func() bool { addr = f.metrics.Addr(); return addr != "" })
+	res, err := http.Get("http://" + addr + "/metrics")
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("unexpected status: %d", res.StatusCode)
+	}
+
+	stopWorkerService(t, done)
+}
+
 func TestWorkerServiceFinishesJobOnSIGTERM(t *testing.T) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
@@ -107,11 +130,11 @@ func freePort(t *testing.T) uint {
 func startWorkerService(t *testing.T, f *fixture) <-chan error {
 	t.Helper()
 
-	w := New(f.settings, f.queue, f.cache, f.resizer)
+	w := New(f.settings, f.queue, f.cache, f.resizer, f.metrics)
 	w.readBlock = 50 * time.Millisecond
 
 	done := make(chan error, 1)
-	go func() { done <- NewService(f.settings, w).Start() }()
+	go func() { done <- NewService(f.settings, w, f.metrics).Start() }()
 
 	return done
 }

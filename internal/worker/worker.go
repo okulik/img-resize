@@ -13,6 +13,7 @@ import (
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/settings"
 )
@@ -29,6 +30,7 @@ type Worker struct {
 	queue     *queue.Queue
 	cache     cache.ImageCacheAdapter
 	resizer   *image.Resizer
+	metrics   *metrics.Metrics
 	consumer  string
 	readBlock time.Duration
 	// slots limits how many jobs run at once, as memory allows no more than
@@ -37,12 +39,13 @@ type Worker struct {
 	slots chan struct{}
 }
 
-func New(settings *settings.Settings, queue *queue.Queue, imageCache cache.ImageCacheAdapter, resizer *image.Resizer) *Worker {
+func New(settings *settings.Settings, queue *queue.Queue, imageCache cache.ImageCacheAdapter, resizer *image.Resizer, metrics *metrics.Metrics) *Worker {
 	return &Worker{
 		settings:  settings,
 		queue:     queue,
 		cache:     imageCache,
 		resizer:   resizer,
+		metrics:   metrics,
 		consumer:  consumerName(),
 		readBlock: defaultReadBlock,
 		slots:     make(chan struct{}, max(settings.Service.WorkerConcurrency, 1)),
@@ -145,12 +148,14 @@ func (w *Worker) reclaimOne(ctx context.Context) bool {
 	defer w.release()
 
 	ctx = context.WithoutCancel(ctx)
-	deliveries, _, err := w.queue.Reclaim(ctx, w.consumer)
+	deliveries, abandoned, err := w.queue.Reclaim(ctx, w.consumer)
 	if err != nil {
 		log.Printf("reclaiming jobs: %v", err)
 	}
+	w.metrics.Jobs.WithLabelValues(metrics.ResultAbandoned).Add(float64(abandoned))
 
 	for _, delivery := range deliveries {
+		w.metrics.Jobs.WithLabelValues(metrics.ResultRetried).Inc()
 		w.handle(ctx, delivery)
 	}
 
@@ -177,7 +182,9 @@ func (w *Worker) handle(ctx context.Context, d queue.Delivery) {
 		log.Printf("job %s: %v", job.ID, err)
 	}
 
+	start := time.Now()
 	data, err := w.resizer.Resize(ctx, job.URL, job.Width, job.Height)
+	w.metrics.JobDuration.Observe(time.Since(start).Seconds())
 	if err != nil {
 		w.handleFailure(ctx, d, err)
 		return
@@ -187,6 +194,7 @@ func (w *Worker) handle(ctx context.Context, d queue.Delivery) {
 		log.Printf("job %s: attempt %d could not store the image", job.ID, d.Attempts)
 		return
 	}
+	w.metrics.Bandwidth.WithLabelValues(metrics.DirectionStored).Add(float64(len(data)))
 
 	w.complete(ctx, d)
 }
@@ -203,13 +211,17 @@ func (w *Worker) handleFailure(ctx context.Context, d queue.Delivery, err error)
 	log.Printf("job %s: failed: %v", d.Job.ID, err)
 	if err := w.queue.Fail(ctx, d, failure.Reason); err != nil {
 		log.Printf("job %s: %v", d.Job.ID, err)
+		return
 	}
+	w.metrics.Jobs.WithLabelValues(metrics.ResultFailure).Inc()
 }
 
 func (w *Worker) complete(ctx context.Context, d queue.Delivery) {
 	if err := w.queue.Complete(ctx, d); err != nil {
 		log.Printf("job %s: %v", d.Job.ID, err)
+		return
 	}
+	w.metrics.Jobs.WithLabelValues(metrics.ResultSuccess).Inc()
 }
 
 // acquire takes a slot, and reports false if ctx was cancelled first.

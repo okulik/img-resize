@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/model"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
@@ -25,8 +26,9 @@ const (
 	retryAfterSeconds  = "5"
 	imageCacheControl  = "private, max-age=900"
 
-	requestsBucket = "requests"
-	bytesBucket    = "bytes"
+	// The buckets are named like the limit label of the throttled metric.
+	requestsBucket = metrics.LimitRequests
+	bytesBucket    = metrics.LimitBytes
 
 	statusSuccess  = "success"
 	statusFailure  = "failure"
@@ -38,15 +40,17 @@ type ResizerHandler struct {
 	imageCache cache.ImageCacheAdapter
 	queue      *queue.Queue
 	limiter    *ratelimit.Limiter
+	metrics    *metrics.Metrics
 }
 
 // Creates a new instance of ResizerHandler object.
-func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter) *ResizerHandler {
+func NewResizerHandler(settings *settings.Settings, imageCache cache.ImageCacheAdapter, queue *queue.Queue, limiter *ratelimit.Limiter, metrics *metrics.Metrics) *ResizerHandler {
 	return &ResizerHandler{
 		settings:   settings,
 		imageCache: imageCache,
 		queue:      queue,
 		limiter:    limiter,
+		metrics:    metrics,
 	}
 }
 
@@ -101,6 +105,7 @@ func (rh *ResizerHandler) ResizeImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if depth >= rh.settings.Service.MaxQueueDepth {
 		log.Printf("job queue full at %d jobs, rejecting request", depth)
+		rh.metrics.Rejected.WithLabelValues(metrics.ReasonQueueFull).Inc()
 		rh.writeUnavailable(w, nil)
 		return
 	}
@@ -142,6 +147,7 @@ func (rh *ResizerHandler) allow(w http.ResponseWriter, r *http.Request, bucket s
 		return false
 	}
 	if !allowed {
+		rh.metrics.Throttled.WithLabelValues(bucket).Inc()
 		seconds := max(1, int(math.Ceil(retryAfter.Seconds())))
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		web.WriteErrorResponse(w, errors.New("too many requests"), http.StatusTooManyRequests)
@@ -318,5 +324,7 @@ func (rh *ResizerHandler) writeImageResponse(w http.ResponseWriter, r *http.Requ
 	if _, err := w.Write(data); err != nil {
 		// The status is sent, so all that is left is to log.
 		log.Printf("writing image response: %v", err)
+		return
 	}
+	rh.metrics.Bandwidth.WithLabelValues(metrics.DirectionServed).Add(float64(len(data)))
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/okulik/img-resize/internal/cache"
 	"github.com/okulik/img-resize/internal/image"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
@@ -167,12 +168,12 @@ func startService(t *testing.T, settings *settings.Settings) <-chan error {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	t.Cleanup(stopWorker)
 	go func() {
-		_ = worker.New(settings, jobs, imageCache, image.NewResizer(settings)).Run(workerCtx)
+		_ = worker.New(settings, jobs, imageCache, image.NewResizer(settings), metrics.New()).Run(workerCtx)
 	}()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- service.NewService(settings, imageCache, jobs, ratelimit.New(client, time.Now)).Start()
+		done <- service.NewService(settings, imageCache, jobs, ratelimit.New(client, time.Now), metrics.New()).Start()
 	}()
 
 	return done

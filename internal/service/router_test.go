@@ -8,6 +8,7 @@ import (
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/okulik/img-resize/internal/cache"
+	"github.com/okulik/img-resize/internal/metrics"
 	"github.com/okulik/img-resize/internal/queue"
 	"github.com/okulik/img-resize/internal/ratelimit"
 	"github.com/okulik/img-resize/internal/service"
@@ -81,5 +82,17 @@ func buildRouter(t *testing.T) *chi.Mux {
 	settings, _ := settings.Load()
 	cache, _ := cache.NewLRUImageCache(1)
 
-	return service.NewRouter(settings, cache, queue.New(client, settings), ratelimit.New(client, time.Now))
+	return service.NewRouter(settings, cache, queue.New(client, settings), ratelimit.New(client, time.Now), metrics.New())
+}
+
+func TestPublicPortHidesMetrics(t *testing.T) {
+	router := buildRouter(t)
+
+	req, _ := http.NewRequest("GET", "/metrics", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("unexpected status: got %v want %v", rr.Code, http.StatusNotFound)
+	}
 }
