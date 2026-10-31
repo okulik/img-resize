@@ -30,7 +30,7 @@ build: tools ## Builds the service from source
 	go build -o $(GOBIN)/$(SVCNAME) cmd/$(SVCNAME)/main.go
 
 .PHONY: build-prod
-build-prod: tools ## Builds the service from source for production
+build-prod: ## Builds the service from source for production
 	mkdir -p $(GOBIN)
 	CGO_ENABLED=0 GOOS=linux go build -o $(GOBIN)/$(SVCNAME) -ldflags="-w -s" cmd/$(SVCNAME)/main.go
 

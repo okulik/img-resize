@@ -11,13 +11,14 @@ RUN adduser \
   --no-create-home \
   app
 
-RUN apk add build-base curl
+RUN apk add ca-certificates make
 RUN make build-prod
 
-FROM golang:1.27.3-alpine
+FROM scratch
 
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder --chown=0:0 /app/bin /
 
 ENV HTTP_SERVER_PORT=4000
