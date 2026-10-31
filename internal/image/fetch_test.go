@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -83,6 +85,93 @@ func TestFetchRejectsUnsupportedScheme(t *testing.T) {
 		if _, err := resizer.fetch(context.Background(), url); err == nil {
 			t.Errorf("expected fetching %s to fail", url)
 		}
+	}
+}
+
+func TestFetchReadsLargeBodyWithoutCopying(t *testing.T) {
+	const size = 8 << 20
+	body := make([]byte, size)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(size))
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(source.Close)
+
+	settings := buildFetchSettings(true)
+	settings.Service.MaxImageSize = 2 * size
+	resizer := NewResizer(settings)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	data, err := resizer.fetch(context.Background(), source.URL)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	if len(data) != size {
+		t.Errorf("unexpected size: got %d want %d", len(data), size)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > size+size/4 {
+		t.Errorf("fetching %d bytes allocated %d bytes", size, allocated)
+	}
+}
+
+func TestFetchSizeLimit(t *testing.T) {
+	writeBody := func(size int) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(make([]byte, size)) }
+	}
+	withContentLength := func(next http.HandlerFunc, size int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+			next(w, r)
+		}
+	}
+	chunked := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.(http.Flusher).Flush()
+			next(w, r)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantLen int
+		reason  string
+	}{
+		{name: "empty body", handler: writeBody(0)},
+		{name: "at limit", handler: withContentLength(writeBody(1024), 1024), wantLen: 1024},
+		{name: "one over limit", handler: withContentLength(writeBody(1025), 1025), reason: ReasonTooLarge},
+		{name: "far over limit", handler: withContentLength(writeBody(4096), 4096), reason: ReasonTooLarge},
+		{name: "at limit without length", handler: chunked(writeBody(1024)), wantLen: 1024},
+		{name: "over limit without length", handler: chunked(writeBody(1025)), reason: ReasonTooLarge},
+		{name: "shorter than its length", handler: withContentLength(writeBody(100), 200), reason: ReasonFetch},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := httptest.NewServer(test.handler)
+			t.Cleanup(source.Close)
+
+			data, err := NewResizer(buildFetchSettings(true)).fetch(context.Background(), source.URL)
+
+			if test.reason == "" {
+				if err != nil {
+					t.Fatalf("unexpected error %v", err)
+				}
+				if len(data) != test.wantLen {
+					t.Errorf("unexpected size: got %d want %d", len(data), test.wantLen)
+				}
+
+				return
+			}
+
+			var failure *Failure
+			if !errors.As(err, &failure) || failure.Reason != test.reason {
+				t.Errorf("unexpected error: got %v want reason %q", err, test.reason)
+			}
+		})
 	}
 }
 

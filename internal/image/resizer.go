@@ -75,11 +75,18 @@ func (r *Resizer) fetch(ctx context.Context, url string) ([]byte, error) {
 	// read one byte more than allowed, so that an oversized body is detected
 	// instead of silently truncated
 	maxSize := r.settings.Service.MaxImageSize
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxSize+1))
-	if err != nil {
+	// ReadFrom doubles the buffer unless MinRead bytes are free, even when all
+	// that's left to read is the end of the body
+	capacity := bytes.MinRead
+	if res.ContentLength > 0 {
+		capacity += int(min(res.ContentLength, maxSize+1))
+	}
+	body := bytes.NewBuffer(make([]byte, 0, capacity))
+	if _, err := body.ReadFrom(io.LimitReader(res.Body, maxSize+1)); err != nil {
 		return nil, transient(ReasonFetch, fmt.Errorf("failed to read image data: %w", err))
 	}
 
+	data := body.Bytes()
 	if int64(len(data)) > maxSize {
 		return nil, permanent(ReasonTooLarge, fmt.Errorf("image exceeds the size limit of %d bytes", maxSize))
 	}
