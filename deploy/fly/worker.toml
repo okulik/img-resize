@@ -1,0 +1,31 @@
+app = "img-resize-worker"
+primary_region = "fra"
+# One 5s read block, a 10s fetch and the resize.
+kill_timeout = 30
+
+[env]
+  SVC_ROLE = "worker"
+  SVC_MAX_IMG_DIMENSION = "2048"
+  SVC_MAX_IMG_PIXELS = "12000000"
+  SVC_MAX_IMG_SOURCE_DIMENSION = "8192"
+  SVC_IMG_CACHE_TTL = "15m"
+  GOMEMLIMIT = "200MiB"
+
+# No [http_service]: workers take no traffic. The autoscaler starts and stops them.
+[checks]
+  [checks.health]
+    type = "http"
+    port = 4000
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

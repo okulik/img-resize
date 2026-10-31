@@ -1,0 +1,22 @@
+app = "img-resize-autoscaler"
+primary_region = "fra"
+
+[build]
+  image = "flyio/fly-autoscaler:0.3"
+
+[env]
+  FAS_APP_NAME = "img-resize-worker"
+  FAS_STARTED_MACHINE_COUNT = "min(5, ceil(backlog / 30))"
+  FAS_PROMETHEUS_METRIC_NAME = "backlog"
+  FAS_PROMETHEUS_ADDRESS = "https://api.fly.io/prometheus/personal"
+  # Queue depth times average job duration, with a 1s fallback when no jobs have run.
+  # An idle 0/0 gives NaN, which `or` keeps, so the `> 0` filter drops it first.
+  FAS_PROMETHEUS_QUERY = 'max(resize_queue_depth{app="img-resize-web"}) * ((sum(rate(resize_job_duration_seconds_sum{app="img-resize-worker"}[5m])) / sum(rate(resize_job_duration_seconds_count{app="img-resize-worker"}[5m])) > 0) or vector(1))'
+
+[metrics]
+  port = 9090
+  path = "/metrics"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
