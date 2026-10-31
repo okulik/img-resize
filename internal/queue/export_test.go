@@ -17,3 +17,10 @@ func (q *Queue) WaiterCount() int {
 
 // SetRecheckInterval changes how often Wait rereads the job state.
 func (q *Queue) SetRecheckInterval(d time.Duration) { q.recheck = d }
+
+// ProbeWaiter registers a waiter for id like Wait does, and returns the channel
+// that Listen wakes and a function to unregister it.
+func (q *Queue) ProbeWaiter(id string) (<-chan struct{}, func()) {
+	w := q.addWaiter(id)
+	return w, func() { q.removeWaiter(id, w) }
+}

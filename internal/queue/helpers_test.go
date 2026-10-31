@@ -74,24 +74,12 @@ func (r *redisHandle) waitDone(t *testing.T, sub *redis.PubSub, id string) {
 	}
 }
 
-// numSub counts the subscribers of the completion channel.
-func (r *redisHandle) numSub(t *testing.T) int64 {
-	t.Helper()
-
-	subs, err := r.PubSubNumSub(context.Background(), "resize:done").Result()
-	if err != nil {
-		t.Fatalf("counting subscribers: %v", err)
-	}
-
-	return subs["resize:done"]
-}
-
-// listen runs q.Listen until the test ends and returns once its subscription
-// is in place, so a notice published afterwards is not missed.
+// listen runs q.Listen until the test ends and returns once it delivers
+// notices. It publishes a probe ID until a waiter registered for it is woken,
+// as counting subscribers would count other packages' too.
 func listen(t *testing.T, q *queue.Queue, r *redisHandle) {
 	t.Helper()
 
-	before := r.numSub(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -103,7 +91,23 @@ func listen(t *testing.T, q *queue.Queue, r *redisHandle) {
 		<-done
 	})
 
-	eventually(t, "the listener to subscribe", func() bool { return r.numSub(t) > before })
+	const probeID = "listen-probe"
+	woken, remove := q.ProbeWaiter(probeID)
+	defer remove()
+
+	deadline := time.After(10 * time.Second)
+	for {
+		if err := r.Publish(context.Background(), "resize:done", probeID).Err(); err != nil {
+			t.Fatalf("publishing probe: %v", err)
+		}
+		select {
+		case <-woken:
+			return
+		case <-time.After(20 * time.Millisecond):
+		case <-deadline:
+			t.Fatal("timed out waiting for the listener to subscribe")
+		}
+	}
 }
 
 // eventually polls cond until it holds, failing the test after 10 seconds.
