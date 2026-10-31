@@ -46,8 +46,9 @@ func (svc *Service) Start() error {
 
 func (svc *Service) startHttpServer() (*http.Server, context.CancelFunc) {
 	// Create a context that will be used as a http handler methods'
-	// base context and that will be called on server's graceful
-	// shutdown.
+	// base context. It's cancelled only after the server's graceful
+	// shutdown, which allows all http handler methods to finish their
+	// work first.
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	server := http.Server{
 		Addr:         fmt.Sprintf(":%d", svc.settings.Http.ServerPort),
@@ -57,11 +58,6 @@ func (svc *Service) startHttpServer() (*http.Server, context.CancelFunc) {
 		ReadTimeout:  svc.settings.Http.ServerReadTimeout,
 		WriteTimeout: svc.settings.Http.ServerWriteTimeout,
 	}
-	// Register the base context cancel function with the server's
-	// OnShutdown hook so that it will be called on server's graceful
-	// shutdown. This will allow all http handler methods to finish
-	// their work before the server is shutdown.
-	server.RegisterOnShutdown(baseCancel)
 
 	// Start the http server in a goroutine so that it doesn't block.
 	// If the server fails to start, log the error and exit.
