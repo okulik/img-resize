@@ -8,6 +8,8 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -115,6 +117,73 @@ func TestResizeRejectsImageWithZeroHeight(t *testing.T) {
 	var failure *image.Failure
 	if !errors.As(err, &failure) || failure.Reason != image.ReasonInvalid {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestResizeRejectsColorModelsOtherThanYCbCrAndGray(t *testing.T) {
+	tests := []struct {
+		name string
+		data func(t *testing.T) []byte
+	}{
+		{"YCCK", func(t *testing.T) []byte { return readFixture(t, "testdata/cmyk.jpg") }},
+		{"CMYK", func(t *testing.T) []byte {
+			data := readFixture(t, "testdata/cmyk.jpg")
+			adobe := bytes.Index(data, []byte("Adobe"))
+			if adobe < 0 {
+				t.Fatal("adobe marker not found")
+			}
+			data[adobe+11] = 0
+
+			return data
+		}},
+		{"Adobe RGB", func(t *testing.T) []byte {
+			return slices.Insert(buildJPEG(t, 64, 64), 2, adobeRGBMarker()...)
+		}},
+		{"Adobe RGB marked after the first scan", func(t *testing.T) []byte {
+			data := buildJPEG(t, 64, 64)
+
+			return slices.Insert(data, len(data)-2, adobeRGBMarker()...)
+		}},
+		{"RGB component identifiers", func(t *testing.T) []byte {
+			data := buildJPEG(t, 64, 64)
+			frameHeader := bytes.Index(data, []byte{0xff, 0xc0})
+			scanHeader := bytes.Index(data, []byte{0xff, 0xda})
+			if frameHeader < 0 || scanHeader < 0 {
+				t.Fatal("jpeg headers not found")
+			}
+			data[frameHeader+10], data[frameHeader+13], data[frameHeader+16] = 'R', 'G', 'B'
+			data[scanHeader+5], data[scanHeader+7], data[scanHeader+9] = 'R', 'G', 'B'
+
+			return data
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := serveImage(t, test.data(t))
+
+			_, err := image.NewResizer(buildSettings()).Resize(context.Background(), source.URL, 32, 0)
+
+			var failure *image.Failure
+			if !errors.As(err, &failure) {
+				t.Fatalf("expected a *image.Failure: got %v", err)
+			}
+			if failure.Reason != image.ReasonInvalid || !failure.Permanent {
+				t.Errorf("unexpected failure: got reason %q permanent %v (%v)", failure.Reason, failure.Permanent, failure.Err)
+			}
+		})
+	}
+}
+
+func TestResizeAcceptsGrayscale(t *testing.T) {
+	data := bytes.Buffer{}
+	if err := jpeg.Encode(&data, stdimage.NewGray(stdimage.Rect(0, 0, 64, 64)), nil); err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	source := serveImage(t, data.Bytes())
+
+	if _, err := image.NewResizer(buildSettings()).Resize(context.Background(), source.URL, 32, 0); err != nil {
+		t.Errorf("unexpected error %v", err)
 	}
 }
 
@@ -278,6 +347,24 @@ func buildJPEG(t *testing.T, width int, height int) []byte {
 	}
 
 	return data.Bytes()
+}
+
+func readFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	return data
+}
+
+// An APP14 segment declaring a three-component image to be RGB.
+func adobeRGBMarker() []byte {
+	marker := []byte{0xff, 0xee, 0x00, 0x0e}
+	marker = append(marker, "Adobe"...)
+
+	return append(marker, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00)
 }
 
 func serveImage(t *testing.T, data []byte) *httptest.Server {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"image/jpeg"
 	"io"
 	"log"
@@ -100,6 +101,10 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 		return nil, permanent(ReasonInvalid, fmt.Errorf("failed to decode jpeg config: %w", err))
 	}
 
+	if !isSupportedColorModel(config.ColorModel) {
+		return nil, permanent(ReasonInvalid, errors.New("jpeg color model is neither YCbCr nor grayscale"))
+	}
+
 	if int64(config.Width)*int64(config.Height) > r.settings.Service.MaxImagePixels {
 		return nil, permanent(ReasonTooLarge, fmt.Errorf("image size %dx%d exceeds the pixel limit", config.Width, config.Height))
 	}
@@ -125,6 +130,12 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 		return nil, permanent(ReasonInvalid, fmt.Errorf("failed to decode jpeg: %w", err))
 	}
 
+	// DecodeConfig stops at the first scan, while a later Adobe marker can still
+	// turn the decoded image into RGB
+	if !isSupportedColorModel(img.ColorModel()) {
+		return nil, permanent(ReasonInvalid, errors.New("decoded jpeg color model is neither YCbCr nor grayscale"))
+	}
+
 	// if either width or height is 0, it will resize respecting the aspect ratio
 	newImage := jpgresize.Resize(width, height, img, jpgresize.Lanczos3)
 
@@ -135,6 +146,12 @@ func (r *Resizer) resize(data []byte, width uint, height uint) ([]byte, error) {
 	}
 
 	return newData.Bytes(), nil
+}
+
+// Reports whether images of a color model stay within the memory budget. The
+// resize library's temporary buffers are smallest for YCbCr and grayscale.
+func isSupportedColorModel(model color.Model) bool {
+	return model == color.YCbCrModel || model == color.GrayModel
 }
 
 // Calculates the size of a resized image. If either width or height is 0, it is
