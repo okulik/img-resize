@@ -23,6 +23,7 @@ services:
     command: redis-server --requirepass ${SVC_REDIS_PASSWORD:-resizer-dev}
     ports:
       - target: "6379"
+        host_ip: 127.0.0.1
         published: "6379"
         protocol: tcp
         mode: host
