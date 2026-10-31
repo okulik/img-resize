@@ -14,6 +14,7 @@ env:
 jobs:
   build-and-push-image:
     name: Publish Docker image
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,6 +23,8 @@ jobs:
       -
         name: Checks out the code
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       -
         name: Log in to the Container registry
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
