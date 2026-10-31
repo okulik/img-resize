@@ -129,10 +129,8 @@ func (r *Resizer) Process(request *model.ResizeRequest, ctx context.Context) ([]
 	results := make([]model.ResizeResponse, 0, len(request.URLs))
 
 	for _, url := range request.URLs {
-		resp, err := r.processImageResize(ctx, url, request.Width, request.Height)
-		if err != nil {
-			results = append(results, resp)
-		}
+		resp, _ := r.processImageResize(ctx, url, request.Width, request.Height)
+		results = append(results, resp)
 	}
 
 	return results, nil
