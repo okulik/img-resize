@@ -82,6 +82,26 @@ docker-build: deps ## Builds docker image
 docker-compose-run: deps ## Builds and runs docker compose services
 	docker compose up -d --build
 
+.PHONY: fly-up
+fly-up: ## Creates or updates the whole Fly.io demo
+	scripts/fly-demo up
+
+.PHONY: fly-start
+fly-start: ## Starts the stopped Fly.io demo
+	scripts/fly-demo start
+
+.PHONY: fly-stop
+fly-stop: ## Stops the Fly.io demo and keeps its apps and Redis
+	scripts/fly-demo stop
+
+.PHONY: fly-status
+fly-status: ## Shows the state of the Fly.io demo
+	scripts/fly-demo status
+
+.PHONY: fly-down
+fly-down: ## Permanently deletes the Fly.io demo, after asking
+	scripts/fly-demo down
+
 $(TOOLSBIN)/golangci-lint:  ## Installs golang linter
 	scripts/install-golangci-lint $(TOOLSBIN) $(GOLANGCI_LINT_VERSION)
 

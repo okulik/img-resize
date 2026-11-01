@@ -39,15 +39,9 @@ docker compose up -d --build
 
 ### From source
 
-You need Go and a Redis. In development the service reads `.env.dev`, which is not in the repository, so create it first:
+You need Go and a Redis. In development the service reads its login and Redis password from `.env.dev`. Start Redis with:
 
 ```bash
-cat > .env.dev <<'EOF'
-AUTH_USERNAME=admin
-AUTH_PASSWORD=admin
-SVC_REDIS_PASSWORD=resizer-dev
-EOF
-
 docker compose up -d redis
 ```
 
@@ -219,7 +213,7 @@ make lint           # Runs golangci-lint
 
 ## Deployment
 
-[`deploy/fly`](deploy/fly) holds the configuration and step-by-step guide for Fly.io: three apps in `fra` with Upstash Redis, 256 MB machines, and an autoscaler that runs 1 to 5 workers based on queue backlog. There's no CI deployment, so deploys are run with `fly deploy`.
+[`deploy/fly`](deploy/fly) holds the configuration and step-by-step guide for Fly.io: three apps in `fra` with Upstash Redis, 256 MB machines, and an autoscaler that runs 1 to 5 workers based on queue backlog. There's no CI deployment. `make fly-up` builds the whole demo from nothing, `make fly-stop` and `make fly-start` pause it, and `make fly-down` deletes it.
 
 ## A wish list
 

@@ -2,4 +2,7 @@ bin
 .tools
 __debug_bin
 .vscode
-fly-demo-login.env
+.env.*
+*.env
+!.env.dev
+!.env.test

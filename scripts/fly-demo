@@ -1,0 +1,199 @@
+#!/usr/bin/env sh
+
+# Creates, stops, starts and destroys the Fly.io demo. Every command can be run
+# again after a failure. No secret is ever printed.
+
+set -eu
+
+USAGE="USAGE $0 up|start|stop|status|down"
+
+ORG=personal
+REGION=fra
+REDIS=img-resize
+WEB=img-resize-web
+WORKER=img-resize-worker
+AUTOSCALER=img-resize-autoscaler
+WORKER_COUNT=5
+LOGIN_FILE="${FLY_LOGIN_FILE:-$HOME/.config/img-resize/fly-login.env}"
+
+cd "$(dirname "$0")/.."
+
+app_exists() {
+  fly apps list -q | grep -qx " *$1 *"
+}
+
+redis_exists() {
+  fly redis list | grep -q "^ *$REDIS "
+}
+
+has_secret() {
+  fly secrets list -a "$1" | grep -q "$2"
+}
+
+machines() {
+  fly machine list -a "$1" -q | tr -d ' ' | grep . || true
+}
+
+create_redis() {
+  if redis_exists; then
+    echo "Redis $REDIS already exists"
+    return
+  fi
+  echo "Creating Redis $REDIS on pay-as-you-go ..."
+  # The output holds the password.
+  fly redis create --name "$REDIS" --org "$ORG" --region "$REGION" --no-replicas \
+    --enable-eviction --enable-prodpack=false > /dev/null
+}
+
+create_apps() {
+  for app in "$WEB" "$WORKER" "$AUTOSCALER"; do
+    if app_exists "$app"; then
+      echo "App $app already exists"
+    else
+      fly apps create "$app" --org "$ORG"
+    fi
+  done
+}
+
+# Also repairs the login of an app after a failed run, keeping the saved one.
+set_login_secrets() {
+  if has_secret "$WEB" AUTH_PASSWORD; then
+    return
+  fi
+  if [ ! -f "$LOGIN_FILE" ]; then
+    mkdir -p "$(dirname "$LOGIN_FILE")"
+    (
+      umask 077
+      printf 'AUTH_USERNAME=admin\nAUTH_PASSWORD=%s\n' "$(openssl rand -hex 24)" > "$LOGIN_FILE"
+    )
+    echo "Created a new login in $LOGIN_FILE"
+  fi
+  fly secrets import -a "$WEB" --stage < "$LOGIN_FILE" > /dev/null
+}
+
+# Runs every time, so `up` also applies a password from `fly redis reset`.
+set_redis_secrets() {
+  status=$(fly redis status "$REDIS")
+  password=$(printf '%s\n' "$status" | sed -n 's|.*redis://[^:]*:\([^@]*\)@.*|\1|p')
+  host=$(printf '%s\n' "$status" | sed -n 's|.*@\(fly-[^:]*\):.*|\1|p')
+  if [ -z "$password" ] || [ -z "$host" ]; then
+    echo "Could not read the address of Redis $REDIS" >&2
+    exit 1
+  fi
+  for app in "$WEB" "$WORKER"; do
+    printf 'SVC_REDIS_HOST=%s\nSVC_REDIS_PASSWORD=%s\n' "$host" "$password" |
+      fly secrets import -a "$app" --stage > /dev/null
+  done
+}
+
+set_autoscaler_secrets() {
+  if has_secret "$AUTOSCALER" FAS_API_TOKEN; then
+    return
+  fi
+  fly secrets set -a "$AUTOSCALER" --stage \
+    FAS_API_TOKEN="$(fly tokens create deploy -a "$WORKER")" \
+    FAS_PROMETHEUS_TOKEN="$(fly tokens create readonly "$ORG")" > /dev/null
+}
+
+create_worker_pool() {
+  first=$(machines "$WORKER" | head -n 1)
+  count=$(machines "$WORKER" | wc -l | tr -d ' ')
+  while [ "$count" -lt "$WORKER_COUNT" ]; do
+    fly machine clone -a "$WORKER" "$first"
+    count=$((count + 1))
+  done
+}
+
+wait_for_health() {
+  url="https://$WEB.fly.dev/health"
+  i=0
+  while [ "$i" -lt 30 ]; do
+    if curl -fsS -m 5 -o /dev/null "$url"; then
+      echo "$url is healthy"
+      return
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  echo "$url did not become healthy" >&2
+  exit 1
+}
+
+up() {
+  create_redis
+  create_apps
+  set_login_secrets
+  set_redis_secrets
+  fly deploy -c deploy/fly/web.toml --ha=false --yes
+  fly deploy -c deploy/fly/worker.toml --ha=false --yes
+  create_worker_pool
+  set_autoscaler_secrets
+  fly deploy -c deploy/fly/autoscaler.toml --ha=false --yes
+  wait_for_health
+  echo "Login is in $LOGIN_FILE"
+}
+
+start() {
+  for id in $(machines "$WEB"); do
+    fly machine update "$id" -a "$WEB" --autostart=true --yes
+    fly machine start "$id" -a "$WEB"
+  done
+  # It starts the workers.
+  for id in $(machines "$AUTOSCALER"); do
+    fly machine start "$id" -a "$AUTOSCALER"
+  done
+  wait_for_health
+}
+
+# The autoscaler goes first, as it would start the workers again. Web would
+# start on the next request, so its autostart goes off before it stops.
+stop() {
+  for id in $(machines "$AUTOSCALER"); do
+    fly machine stop "$id" -a "$AUTOSCALER"
+  done
+  for id in $(machines "$WORKER"); do
+    fly machine stop "$id" -a "$WORKER"
+  done
+  for id in $(machines "$WEB"); do
+    fly machine update "$id" -a "$WEB" --autostart=false --yes
+    fly machine stop "$id" -a "$WEB"
+  done
+}
+
+status() {
+  for app in "$WEB" "$WORKER" "$AUTOSCALER"; do
+    if app_exists "$app"; then
+      fly status -a "$app"
+    else
+      echo "App $app does not exist"
+    fi
+  done
+  fly redis list | grep -E "NAME|^ *$REDIS " || echo "Redis $REDIS does not exist"
+}
+
+down() {
+  echo "This permanently deletes $WEB, $WORKER, $AUTOSCALER and Redis $REDIS."
+  printf 'Type %s to confirm: ' "$REDIS"
+  read -r answer
+  if [ "$answer" != "$REDIS" ]; then
+    echo "Nothing was deleted"
+    exit 1
+  fi
+  for app in "$WEB" "$WORKER" "$AUTOSCALER"; do
+    if app_exists "$app"; then
+      fly apps destroy "$app" --yes
+    fi
+  done
+  if redis_exists; then
+    fly redis destroy "$REDIS" --yes
+  fi
+  echo "The read-only token of the autoscaler outlives the apps. Revoke it with 'fly tokens list --org $ORG' and 'fly tokens revoke'."
+}
+
+case "${1:-}" in
+  up | start | stop | status | down) "$1" ;;
+  *)
+    echo "$USAGE" >&2
+    exit 1
+    ;;
+esac

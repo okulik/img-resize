@@ -10,6 +10,24 @@ Three apps in the `personal` org, region `fra`:
 
 Run every command from the repo root. Never put a real secret in a file in this repo.
 
+## Quick path
+
+You need `flyctl` logged in (`fly auth login`), `openssl` and `curl`.
+
+| Command | What it does |
+|---|---|
+| `make fly-up` | Creates everything that's missing and deploys all three apps. Safe to run again |
+| `make fly-stop` | Stops every machine and keeps the apps, secrets and Redis |
+| `make fly-start` | Starts web and the autoscaler, which starts the workers |
+| `make fly-status` | Shows every app and Redis |
+| `make fly-down` | Deletes the apps and Redis, after you type `img-resize` to confirm |
+
+`make fly-up` keeps the login in `~/.config/img-resize/fly-login.env`, or in `FLY_LOGIN_FILE` if that's set. It creates the file if it's missing, and `make fly-down` leaves it in place, so a rebuild has the same login.
+
+After `make fly-down` nothing else survives: Redis comes back empty with a new password, which `make fly-up` picks up. Queued jobs and cached images are gone.
+
+The sections below are the same steps by hand.
+
 ## 1. Prerequisites
 
 - `flyctl` installed and logged in (`fly auth login`).
