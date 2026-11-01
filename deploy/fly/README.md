@@ -14,21 +14,7 @@ Run every command from the repo root. Never put a real secret in a file in this 
 
 - `flyctl` installed and logged in (`fly auth login`).
 - The Upstash database `img-resize` exists. Check it with `fly redis status img-resize`.
-- It must be on the fixed 250 MB plan, not pay-as-you-go. Eviction stays on and auto-upgrade stays off, so a full database drops old images instead of growing the bill.
-
-`fly redis update --help` (flyctl 0.4.123) has no `--plan`, eviction or auto-upgrade flags. It only takes `--enable-prodpack`, `--disable-prodpack`, `--region`, `--replica-regions` and `--org`. Change the plan in the Upstash console, opened with:
-
-```bash
-fly redis dashboard personal
-```
-
-Pick "Fixed 250MB" (`fly redis plans` lists it at $10/mo), leave eviction enabled and auto-upgrade disabled, then confirm:
-
-```bash
-fly redis status img-resize
-```
-
-Expected: `Plan` is `Fixed 250MB`, `Eviction` is `Enabled`, `Auto-Upgrade` is `Disabled`.
+- It stays on pay-as-you-go, which suits a demo: $0.20 per 100K commands, with eviction on. Idle polling is about 1.2M commands a month, or about $2.50, and only logged-in clients can add to that. There's no monthly cap, so move to a fixed plan in `fly redis dashboard personal` before real traffic.
 
 ## 2. Create the three apps
 
@@ -59,6 +45,8 @@ fly secrets set -a img-resize-worker --stage \
 ```
 
 The Redis port is the default 6379, so `SVC_REDIS_PORT` is not set.
+
+`fly redis status` prints the password, so keep its output out of logs and transcripts. After `fly redis reset img-resize`, set only `SVC_REDIS_PASSWORD` on web and worker, without `--stage`, so `AUTH_PASSWORD` keeps its value and the machines restart with the new password.
 
 The autoscaler needs a deploy token for the worker app and a read-only token for the org's Prometheus data:
 
@@ -103,11 +91,10 @@ Expected: 5 machines. The autoscaler's formula, `max(1, min(5, ceil(backlog / 30
 
 Finish this before section 7 and before any real traffic.
 
-1. Move Upstash to the fixed plan (section 1), then run `fly redis reset img-resize`, as the password was exposed in a transcript. The reset changes the password, so set the new `SVC_REDIS_PASSWORD` on `img-resize-web` and `img-resize-worker` again (section 3).
-2. Send a request with a forged `Fly-Client-IP` header and confirm the limiter keys on the real address.
-3. Send a real 12 MP baseline file, a progressive file at `SVC_MAX_IMG_PROGRESSIVE_PIXELS`, a CMYK file and a tall 1464x8192 file, and watch worker memory. The CMYK file must fail with `invalid image`.
-4. Record the p99 of `resize_job_duration_seconds`. Set `SVC_JOB_CLAIM_IDLE` to at least 2 x p99 and the worker `kill_timeout` to at least 5s + p99.
-5. Confirm one scrape in Grafana. Watch the first sync resize and the worker logs for go-redis problems against Upstash, including the `NOGROUP` text.
+1. Send a request with a forged `Fly-Client-IP` header and confirm the limiter keys on the real address.
+2. Send a real 12 MP baseline file, a progressive file at `SVC_MAX_IMG_PROGRESSIVE_PIXELS`, a CMYK file and a tall 1464x8192 file, and watch worker memory. The CMYK file must fail with `invalid image`.
+3. Record the p99 of `resize_job_duration_seconds`. Set `SVC_JOB_CLAIM_IDLE` to at least 2 x p99 and the worker `kill_timeout` to at least 5s + p99.
+4. Confirm one scrape in Grafana. Watch the first sync resize and the worker logs for go-redis problems against Upstash, including the `NOGROUP` text.
 
 ## 7. Deploy the autoscaler
 

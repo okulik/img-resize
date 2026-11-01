@@ -38,11 +38,11 @@ The design has failed, even if it works, if any of these happen:
 
 - Go 1.27.3, chi, go-redis v9, a `scratch` image (no shell).
 - Everything runs in Fly's `fra` region, the owner's choice. That includes Upstash, whose primary region can't be changed later.
-- Managed Redis is Upstash on Fly, on the fixed 250 MB plan with auto-upgrade off and eviction on, the owner's choice. The private URL has the form `redis://password@fly-<name>.upstash.io`.
+- Managed Redis is Upstash on Fly, on pay-as-you-go with eviction on, the owner's choice for a demo. The private URL has the form `redis://password@fly-<name>.upstash.io`.
 - Fly's proxy starts and stops machines but never creates them, and scales on connections, not queue length.
 - fly-autoscaler targets a whole app, reconciles every 15 seconds, and never goes below one machine.
 - Fly scrapes app metrics every 15 seconds.
-- The fixed plan costs $10 a month and includes 250 MB of storage and 50 GB of bandwidth. The queue and the image cache share that storage, and every image crosses Redis twice: stored by a worker, read by web.
+- Pay-as-you-go costs $0.20 per 100K commands, holds up to 10 GB and has no monthly cap. The queue and the image cache share that storage, and every image crosses Redis twice: stored by a worker, read by web.
 - Commits: one fix per commit, a single-line message, no co-author line. Work happens on a branch, with tests written first.
 
 ## Approaches
@@ -164,9 +164,9 @@ The limits assume many separate clients. A single backend would need a higher li
 
 ### Bandwidth
 
-There's no global bandwidth budget, the owner's choice after seeing costs. Every served image passes through Upstash, so the fixed plan's 50 GB a month also limits what web can serve, which keeps Fly's outbound bandwidth to about $1 a month. Above that, Upstash should slow traffic rather than charge more. Step 0 confirms this.
+There's no global bandwidth budget, the owner's choice after seeing costs. Pay-as-you-go has no plan limit on bandwidth, so only per-prefix throttling and the login limit what web can serve.
 
-The worker cap limits machine spend. `SVC_MAX_QUEUE_DEPTH` limits the backlog. The fixed plan limits bandwidth. Throttling stops one client from using up any of them.
+The worker cap limits machine spend. `SVC_MAX_QUEUE_DEPTH` limits the backlog. Throttling stops one client from using up either. Redis commands have no cap, but all of them sit behind the login, so only someone with the password can add to that bill.
 
 ### Metrics
 
@@ -246,8 +246,8 @@ Before step 1, two things come first: the uncommitted change to a `scratch` imag
 
 These are estimates. Fly prices changed in October 2026 and sources disagree, so check before relying on them.
 
-- Normal month: one web, one worker and the autoscaler at 256 MB, about $2.50 each in `fra`, plus $10 for Upstash, comes to about $18.
-- Maximum: two web machines and all 5 workers running all month comes to about $31, including about $1 of bandwidth. Actual cost is lower, since workers only run under load.
+- Normal month: one web, one worker and the autoscaler at 256 MB, about $2.50 each in `fra`, plus about $2.50 for idle Upstash polling (1.2M commands), comes to about $10.
+- Machines at maximum: two web machines and all 5 workers running all month comes to about $18 before Redis. Redis then depends on traffic and has no ceiling.
 
 ## Risks
 
@@ -255,7 +255,7 @@ These are estimates. Fly prices changed in October 2026 and sources disagree, so
 - **Shared-CPU throttling.** Fly's shared CPUs may slow sustained resizing. Step 4 measures throughput.
 - **Single Redis.** If Upstash is down, the service can't accept work or serve images.
 - **Scale-up lag.** If a burst outruns the 30 to 60 second reaction time, jobs wait longer and sync requests return 202.
-- **Volume limits of the plan.** The 250 MB and 50 GB limits suit modest traffic. Sustained heavy use needs a larger plan, or object storage for images.
+- **Uncapped Redis bill.** Pay-as-you-go suits a demo. Real traffic should move to a fixed plan, or object storage for images.
 - **Queue eviction.** If Redis ever holds no keys with a TTL while full, the queue itself could be evicted. Workers and metrics would show a sudden drop in queue length.
 
 ## Left to the builder
