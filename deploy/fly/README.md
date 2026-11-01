@@ -92,7 +92,7 @@ Expected: 5 machines. The autoscaler's formula, `max(1, min(5, ceil(backlog / 30
 Finish this before section 7 and before any real traffic.
 
 1. Send a request with a forged `Fly-Client-IP` header and confirm the limiter keys on the real address.
-2. Send a real 12 MP baseline file, a progressive file at `SVC_MAX_IMG_PROGRESSIVE_PIXELS`, a CMYK file and a tall 1464x8192 file, and watch worker memory. The CMYK file must fail with `invalid image`.
+2. Send a real 12 MP baseline file, a progressive file at `SVC_MAX_IMG_PROGRESSIVE_PIXELS`, a CMYK file and a tall 2400x5000 file, and watch worker memory. The CMYK file must fail with `invalid image`.
 3. Record the p99 of `resize_job_duration_seconds`. Set `SVC_JOB_CLAIM_IDLE` to at least 2 x p99 and the worker `kill_timeout` to at least 5s + p99.
 4. Confirm one scrape in Grafana. Watch the first sync resize and the worker logs for go-redis problems against Upstash, including the `NOGROUP` text.
 
