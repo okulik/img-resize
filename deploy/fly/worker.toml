@@ -11,7 +11,8 @@ kill_timeout = 30
   SVC_MAX_IMG_PROGRESSIVE_PIXELS = "6000000"
   SVC_MAX_IMG_SOURCE_DIMENSION = "8192"
   SVC_IMG_CACHE_TTL = "15m"
-  GOMEMLIMIT = "190MiB"
+  # A 256 MB machine has 210 MiB, and the kernel kills the process near 160 MiB.
+  GOMEMLIMIT = "135MiB"
 
 # No [http_service]: workers take no traffic. The autoscaler starts and stops them.
 [checks]

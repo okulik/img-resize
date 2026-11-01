@@ -14,7 +14,8 @@ kill_timeout = 30
   SVC_IMG_CACHE_TTL = "15m"
   SVC_MAX_QUEUE_DEPTH = "2000"
   HTTP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT = "20s"
-  GOMEMLIMIT = "200MiB"
+  # A 256 MB machine has 210 MiB, and the kernel kills the process near 160 MiB.
+  GOMEMLIMIT = "135MiB"
 
 [http_service]
   internal_port = 4000

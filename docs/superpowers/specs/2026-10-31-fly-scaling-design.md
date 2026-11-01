@@ -42,6 +42,7 @@ The design has failed, even if it works, if any of these happen:
 - Fly's proxy starts and stops machines but never creates them, and scales on connections, not queue length.
 - fly-autoscaler targets a whole app, reconciles every 15 seconds, and never goes below one machine.
 - Fly scrapes app metrics every 15 seconds.
+- A 256 MB Fly machine reports 210 MiB of memory, and the kernel kills the process at about 162 MiB RSS, measured on `fra`. `GOMEMLIMIT` is 135MiB on both roles for that reason.
 - Pay-as-you-go costs $0.20 per 100K commands, holds up to 10 GB and has no monthly cap. The queue and the image cache share that storage, and every image crosses Redis twice: stored by a worker, read by web.
 - Commits: one fix per commit, a single-line message, no co-author line. Work happens on a branch, with tests written first.
 
